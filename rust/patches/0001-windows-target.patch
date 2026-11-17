@@ -180,6 +180,29 @@ index 4238698..4993d77 100644
  
  pub use gnosis_vpn_ipc::{CountryCode, Geo, GeoSource};
  
+diff --git a/gnosis_vpn-lib/src/hopr/config.rs b/gnosis_vpn-lib/src/hopr/config.rs
+index ed5182b..5ed2dab 100644
+--- a/gnosis_vpn-lib/src/hopr/config.rs
++++ b/gnosis_vpn-lib/src/hopr/config.rs
+@@ -48,13 +48,11 @@ pub async fn from_path(path: PathBuf) -> Result<HoprLibConfig, Error> {
+ 
+ pub async fn store_safe(network_cache_dir: &Path, safe_module: &SafeModule) -> Result<(), Error> {
+     let content = serde_saphyr::to_string(&safe_module)?;
+-    let mut file = fs::OpenOptions::new()
+-        .write(true)
+-        .create(true)
+-        .truncate(true)
+-        .mode(0o600)
+-        .open(safe_file(network_cache_dir))
+-        .await?;
++    let mut options = fs::OpenOptions::new();
++    options.write(true).create(true).truncate(true);
++    #[cfg(unix)]
++    options.mode(0o600);
++    let mut file = options.open(safe_file(network_cache_dir)).await?;
+     file.write_all(content.as_bytes()).await.map_err(Error::IO)
+ }
+ 
 diff --git a/gnosis_vpn-lib/src/hopr/identity.rs b/gnosis_vpn-lib/src/hopr/identity.rs
 index b19c366..588729b 100644
 --- a/gnosis_vpn-lib/src/hopr/identity.rs
@@ -486,10 +509,27 @@ index 0000000..6d292e4
 +    }
 +}
 diff --git a/gnosis_vpn-lib/src/worker_params.rs b/gnosis_vpn-lib/src/worker_params.rs
-index a28f629..dad5637 100644
+index a28f629..198a5b4 100644
 --- a/gnosis_vpn-lib/src/worker_params.rs
 +++ b/gnosis_vpn-lib/src/worker_params.rs
-@@ -243,6 +243,15 @@ impl WorkerParams {
+@@ -111,10 +111,12 @@ impl WorkerParams {
+             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                 tracing::debug!(?path, "no identity pass file - generating one next to the identity");
+                 let pw = identity::generate_pass();
+-                let mut file = fs::OpenOptions::new()
+-                    .write(true)
+-                    .create_new(true)
+-                    .mode(0o600)
++                let mut options = fs::OpenOptions::new();
++                options.write(true).create_new(true);
++                // Windows: %LOCALAPPDATA% is private to the user already.
++                #[cfg(unix)]
++                options.mode(0o600);
++                let mut file = options
+                     .open(&path)
+                     .await
+                     .map_err(|e| {
+@@ -243,6 +245,15 @@ impl WorkerParams {
      }
  }
  
