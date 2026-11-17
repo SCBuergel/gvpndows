@@ -55,7 +55,7 @@ step ssh
 
 ssh_ mkdir -p /root/upload
 scp -q "${SSH_OPTS[@]}" scripts/do-build/setup-remote.sh scripts/do-build/build-remote.sh "root@$ip:/root/upload/"
-ssh_ "bash /root/upload/setup-remote.sh" | grep -E '^STEP|^rustc|^cargo-xwin|SETUP-DONE'
+ssh_ "bash /root/upload/setup-remote.sh" | grep -E '^STEP|^rustc|^cargo-xwin|^[0-9a-f]{7,} |SETUP-DONE'
 step setup
 
 KNOWN_HOSTS=$KNOWN_HOSTS ip=$ip scripts/do-build/rebuild.sh

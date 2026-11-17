@@ -1,0 +1,474 @@
+diff --git a/gnosis_vpn-ipc/src/dirs.rs b/gnosis_vpn-ipc/src/dirs.rs
+index 07469a3..5cd77b4 100644
+--- a/gnosis_vpn-ipc/src/dirs.rs
++++ b/gnosis_vpn-ipc/src/dirs.rs
+@@ -21,6 +21,16 @@ pub fn user_dirs(home: &Path) -> UserDirs {
+     }
+ }
+ 
++#[cfg(windows)]
++pub fn user_dirs(home: &Path) -> UserDirs {
++    let base = home.join("AppData").join("Local").join("GnosisVPN");
++    UserDirs {
++        data: base.join("data"),
++        cache: base.join("cache"),
++        logs: base.join("logs"),
++    }
++}
++
+ #[cfg(target_os = "macos")]
+ pub fn user_dirs(home: &Path) -> UserDirs {
+     UserDirs {
+diff --git a/gnosis_vpn-ipc/src/socket.rs b/gnosis_vpn-ipc/src/socket.rs
+index 86d4248..40d8308 100644
+--- a/gnosis_vpn-ipc/src/socket.rs
++++ b/gnosis_vpn-ipc/src/socket.rs
+@@ -12,6 +12,9 @@ pub const DEFAULT_PATH: &str = "/run/gnosisvpn/gnosisvpn.sock";
+ /// macOS keeps the flat `/var/run` name next to the pid file newsyslog reads.
+ #[cfg(target_os = "macos")]
+ pub const DEFAULT_PATH: &str = "/var/run/gnosisvpn.sock";
++/// Not used on Windows yet (the app embeds the core); a named pipe would replace the socket.
++#[cfg(windows)]
++pub const DEFAULT_PATH: &str = r"\\.\pipe\gnosisvpn";
+ pub const ENV_VAR: &str = "GNOSISVPN_SOCKET_PATH";
+ 
+ /// A stuck service must not freeze a UI thread forever.
+diff --git a/gnosis_vpn-lib/Cargo.toml b/gnosis_vpn-lib/Cargo.toml
+index 6298992..88e07c4 100644
+--- a/gnosis_vpn-lib/Cargo.toml
++++ b/gnosis_vpn-lib/Cargo.toml
+@@ -40,9 +40,9 @@ tracing.workspace            = true
+ tracing-appender.workspace   = true
+ tracing-subscriber.workspace = true
+ url.workspace                = true
+-uzers.workspace              = true
+ 
+ [target.'cfg(unix)'.dependencies]
++uzers  = { workspace = true }
+ libc   = { workspace = true }
+ rustix = { workspace = true }
+ 
+diff --git a/gnosis_vpn-lib/src/app_nap.rs b/gnosis_vpn-lib/src/app_nap.rs
+index a8f5221..7b0b108 100644
+--- a/gnosis_vpn-lib/src/app_nap.rs
++++ b/gnosis_vpn-lib/src/app_nap.rs
+@@ -36,7 +36,7 @@ mod macos {
+     }
+ }
+ 
+-#[cfg(target_os = "linux")]
++#[cfg(not(target_os = "macos"))]
+ mod noop {
+     /// No-op token on non-macOS platforms.
+     pub struct ActivityToken;
+@@ -48,7 +48,7 @@ mod noop {
+ 
+ #[cfg(target_os = "macos")]
+ pub use macos::{ActivityToken, disable};
+-#[cfg(target_os = "linux")]
++#[cfg(not(target_os = "macos"))]
+ pub use noop::{ActivityToken, disable};
+ 
+ #[cfg(test)]
+diff --git a/gnosis_vpn-lib/src/connection/up/runner.rs b/gnosis_vpn-lib/src/connection/up/runner.rs
+index 689b2f1..c560b1e 100644
+--- a/gnosis_vpn-lib/src/connection/up/runner.rs
++++ b/gnosis_vpn-lib/src/connection/up/runner.rs
+@@ -352,12 +352,20 @@ async fn prepare_pump(
+ ) -> Result<(wg_tunnel::WgTunnel, wg_tunnel::TunReader, wg_tunnel::TunWriter), Error> {
+     // The TUN fd is delivered out-of-band by root over the dedicated fd-passing
+     // socket; block for it off the async runtime.
+-    let tun_fd = tokio::task::spawn_blocking(crate::socket::worker::recv_tun_fd)
+-        .await
+-        .map_err(|e| Error::Runtime(format!("tun fd receive task failed: {e}")))?
+-        .map_err(|e| Error::Runtime(format!("failed to receive tun fd from root: {e}")))?;
+-    let (tun_reader, tun_writer) = wg_tunnel::tun_endpoints(tun_fd, wg_tunnel::PLATFORM_TUN_HEADER_LEN)
+-        .map_err(|e| Error::Runtime(format!("failed to wrap tun fd: {e}")))?;
++    #[cfg(unix)]
++    let (tun_reader, tun_writer) = {
++        let tun_fd = tokio::task::spawn_blocking(crate::socket::worker::recv_tun_fd)
++            .await
++            .map_err(|e| Error::Runtime(format!("tun fd receive task failed: {e}")))?
++            .map_err(|e| Error::Runtime(format!("failed to receive tun fd from root: {e}")))?;
++        wg_tunnel::tun_endpoints(tun_fd, wg_tunnel::PLATFORM_TUN_HEADER_LEN)
++            .map_err(|e| Error::Runtime(format!("failed to wrap tun fd: {e}")))?
++    };
++    // Windows: the embedding app registered its Wintun device in-process before it
++    // answered SetupTunnel.
++    #[cfg(windows)]
++    let (tun_reader, tun_writer) = wg_tunnel::device_endpoints()
++        .map_err(|e| Error::Runtime(format!("no tunnel device from the app: {e}")))?;
+ 
+     let preshared = registration.preshared_key();
+     let preshared = if preshared.is_empty() { None } else { Some(preshared) };
+diff --git a/gnosis_vpn-lib/src/dirs.rs b/gnosis_vpn-lib/src/dirs.rs
+index d13c9df..2f7d2da 100644
+--- a/gnosis_vpn-lib/src/dirs.rs
++++ b/gnosis_vpn-lib/src/dirs.rs
+@@ -1,4 +1,5 @@
+ use std::fs::DirBuilder;
++#[cfg(unix)]
+ use std::os::unix::fs::DirBuilderExt;
+ use std::path::{Path, PathBuf};
+ 
+@@ -9,6 +10,8 @@ pub use gnosis_vpn_ipc::dirs::{UserDirs, user_dirs};
+ pub const RUNTIME_DIR: &str = "/run/gnosisvpn";
+ #[cfg(target_os = "macos")]
+ pub const RUNTIME_DIR: &str = "/var/run/gnosisvpn";
++#[cfg(windows)]
++pub const RUNTIME_DIR: &str = r"C:\ProgramData\GnosisVPN";
+ 
+ pub fn runtime_file(name: &str) -> PathBuf {
+     Path::new(RUNTIME_DIR).join(name)
+@@ -26,7 +29,11 @@ pub fn ensure_private_dir(tree_root: &Path, path: &Path) -> std::io::Result<()>
+     if let Some(parent) = tree_root.parent() {
+         std::fs::create_dir_all(parent)?;
+     }
+-    DirBuilder::new().mode(0o700).recursive(true).create(path)
++    let mut builder = DirBuilder::new();
++    // Windows: the per-user profile dirs (%LOCALAPPDATA%) are private to the user already.
++    #[cfg(unix)]
++    builder.mode(0o700);
++    builder.recursive(true).create(path)
+ }
+ 
+ #[cfg(test)]
+diff --git a/gnosis_vpn-lib/src/geoip.rs b/gnosis_vpn-lib/src/geoip.rs
+index 4238698..4993d77 100644
+--- a/gnosis_vpn-lib/src/geoip.rs
++++ b/gnosis_vpn-lib/src/geoip.rs
+@@ -10,6 +10,9 @@ use std::path::{Path, PathBuf};
+ pub const DEFAULT_DB_PATH: &str = "/usr/share/gnosisvpn/geoip.mmdb";
+ #[cfg(target_os = "macos")]
+ pub const DEFAULT_DB_PATH: &str = "/usr/local/share/gnosisvpn/geoip.mmdb";
++/// Windows has no installer layout yet: the app always sets `geoip_db` in the config.
++#[cfg(windows)]
++pub const DEFAULT_DB_PATH: &str = r"C:\Program Files\GnosisVPN\geoip.mmdb";
+ 
+ pub use gnosis_vpn_ipc::{CountryCode, Geo, GeoSource};
+ 
+diff --git a/gnosis_vpn-lib/src/hopr/identity.rs b/gnosis_vpn-lib/src/hopr/identity.rs
+index b19c366..588729b 100644
+--- a/gnosis_vpn-lib/src/hopr/identity.rs
++++ b/gnosis_vpn-lib/src/hopr/identity.rs
+@@ -3,6 +3,7 @@ use rand::distr::Alphanumeric;
+ use rand::prelude::*;
+ use thiserror::Error;
+ 
++#[cfg(unix)]
+ use std::os::unix::fs::PermissionsExt;
+ use std::path::{Path, PathBuf};
+ 
+@@ -29,6 +30,13 @@ pub fn from_path(file: PathBuf, pass: String) -> Result<HoprKeys, Error> {
+ }
+ 
+ /// hopr-types writes the id file without a mode, so it comes out with the umask's group/other bits.
++#[cfg(windows)]
++fn restrict_to_owner(_file: &Path) -> Result<(), Error> {
++    // Lives under %LOCALAPPDATA%, whose ACL already limits it to the user (and SYSTEM/admins).
++    Ok(())
++}
++
++#[cfg(unix)]
+ fn restrict_to_owner(file: &Path) -> Result<(), Error> {
+     let old_mode = std::fs::metadata(file)?.permissions().mode() & 0o777;
+     let readable_by_others = old_mode & 0o077 != 0;
+diff --git a/gnosis_vpn-lib/src/hopr/pix_config.rs b/gnosis_vpn-lib/src/hopr/pix_config.rs
+index ec444bd..be9b5eb 100644
+--- a/gnosis_vpn-lib/src/hopr/pix_config.rs
++++ b/gnosis_vpn-lib/src/hopr/pix_config.rs
+@@ -11,6 +11,9 @@ use url::Url;
+ pub const DEFAULT_CURVY_ZK_DIR: &str = "/usr/share/gnosisvpn/curvy-zk";
+ #[cfg(target_os = "macos")]
+ pub const DEFAULT_CURVY_ZK_DIR: &str = "/usr/local/share/gnosisvpn/curvy-zk";
++/// Windows has no installer layout yet: the app always sets `curvy_zk_dir` in the config.
++#[cfg(windows)]
++pub const DEFAULT_CURVY_ZK_DIR: &str = r"C:\Program Files\GnosisVPN\curvy-zk";
+ 
+ /// curvy-witnesscalc reads the proving files' directory from this variable only.
+ pub const CURVY_ZK_DIR_ENV: &str = "CURVY_ZK_KEYS_DIR";
+diff --git a/gnosis_vpn-lib/src/killswitch/mod.rs b/gnosis_vpn-lib/src/killswitch/mod.rs
+index 9cf29b2..e260b25 100644
+--- a/gnosis_vpn-lib/src/killswitch/mod.rs
++++ b/gnosis_vpn-lib/src/killswitch/mod.rs
+@@ -34,5 +34,8 @@ cfg_if::cfg_if! {
+     } else if #[cfg(target_os = "macos")] {
+         mod macos;
+         pub use macos::{Error, Firewall};
++    } else if #[cfg(windows)] {
++        mod noop;
++        pub use noop::{Error, Firewall};
+     }
+ }
+diff --git a/gnosis_vpn-lib/src/killswitch/noop.rs b/gnosis_vpn-lib/src/killswitch/noop.rs
+new file mode 100644
+index 0000000..e5674ab
+--- /dev/null
++++ b/gnosis_vpn-lib/src/killswitch/noop.rs
+@@ -0,0 +1,40 @@
++//! Windows: the app that embeds the core answers `KillswitchLockdown` itself (WFP), so the
++//! library's firewall is a no-op that only keeps the shared API compiling.
++
++use std::net::IpAddr;
++
++use thiserror::Error;
++
++#[derive(Debug, Error)]
++pub enum Error {
++    #[error("{0}")]
++    Unsupported(String),
++}
++
++pub struct Firewall;
++
++impl Firewall {
++    pub fn new() -> Result<Self, Error> {
++        Ok(Firewall)
++    }
++
++    pub fn capture_recovery_state(&mut self) -> Result<Option<bool>, Error> {
++        Ok(None)
++    }
++
++    pub fn apply_policy(&mut self, _interface: Option<&str>, _allowed_ips: &[IpAddr], _lan_lockdown: bool) -> Result<(), Error> {
++        Ok(())
++    }
++
++    pub fn reapply_policy(&mut self, _interface: Option<&str>, _allowed_ips: &[IpAddr], _lan_lockdown: bool) -> Result<(), Error> {
++        Ok(())
++    }
++
++    pub fn reset_policy(&mut self) -> Result<(), Error> {
++        Ok(())
++    }
++
++    pub fn reset_policy_with_state(&mut self, _was_enabled: Option<bool>) -> Result<(), Error> {
++        Ok(())
++    }
++}
+diff --git a/gnosis_vpn-lib/src/lib.rs b/gnosis_vpn-lib/src/lib.rs
+index d4d2f7a..cf92256 100644
+--- a/gnosis_vpn-lib/src/lib.rs
++++ b/gnosis_vpn-lib/src/lib.rs
+@@ -20,6 +20,7 @@ pub mod socket;
+ pub mod wg_tunnel;
+ pub mod wire;
+ pub mod wireguard;
++#[cfg(unix)]
+ pub mod worker;
+ pub mod worker_params;
+ 
+diff --git a/gnosis_vpn-lib/src/logging.rs b/gnosis_vpn-lib/src/logging.rs
+index 8917750..d7e6da3 100644
+--- a/gnosis_vpn-lib/src/logging.rs
++++ b/gnosis_vpn-lib/src/logging.rs
+@@ -3,6 +3,7 @@ use tracing_subscriber::fmt::writer::BoxMakeWriter;
+ use tracing_subscriber::{EnvFilter, fmt, prelude::*, reload};
+ 
+ use std::fs::OpenOptions;
++#[cfg(unix)]
+ use std::os::unix::fs::OpenOptionsExt;
+ use std::path::Path;
+ 
+@@ -21,11 +22,11 @@ pub fn make_file_fmt_layer(log_path: &Path) -> Result<FileFmtLayer, std::io::Err
+     if let Some(parent) = log_path.parent() {
+         std::fs::create_dir_all(parent)?;
+     }
+-    let file = OpenOptions::new()
+-        .create(true)
+-        .append(true)
+-        .mode(0o644)
+-        .open(log_path)?;
++    let mut options = OpenOptions::new();
++    options.create(true).append(true);
++    #[cfg(unix)]
++    options.mode(0o644);
++    let file = options.open(log_path)?;
+     Ok(fmt::layer().with_writer(BoxMakeWriter::new(file)).with_ansi(false))
+ }
+ 
+diff --git a/gnosis_vpn-lib/src/ping.rs b/gnosis_vpn-lib/src/ping.rs
+index 4fcd727..d4a2c2f 100644
+--- a/gnosis_vpn-lib/src/ping.rs
++++ b/gnosis_vpn-lib/src/ping.rs
+@@ -62,6 +62,9 @@ async fn ping_using_cmd(opts: &Options) -> Result<Duration, Error> {
+         } else if #[cfg(target_os = "macos")] {
+             cmd.arg("-t").arg(opts.timeout.as_secs().to_string());
+             cmd.arg("-m").arg(opts.ttl.to_string());
++        } else if #[cfg(windows)] {
++            cmd.arg("-w").arg(opts.timeout.as_millis().to_string());
++            cmd.arg("-i").arg(opts.ttl.to_string());
+         }
+     }
+ 
+@@ -74,7 +77,7 @@ async fn ping_using_ping_crate(opts: &Options) -> Result<Duration, Error> {
+     cfg_if::cfg_if! {
+         if #[cfg(target_os = "linux")] {
+             let socket_type = ping::SocketType::RAW;
+-        } else if #[cfg(target_os = "macos")] {
++        } else if #[cfg(any(target_os = "macos", windows))] {
+             let socket_type = ping::SocketType::DGRAM;
+         }
+     }
+diff --git a/gnosis_vpn-lib/src/socket/mod.rs b/gnosis_vpn-lib/src/socket/mod.rs
+index 62e6043..eea4832 100644
+--- a/gnosis_vpn-lib/src/socket/mod.rs
++++ b/gnosis_vpn-lib/src/socket/mod.rs
+@@ -1,3 +1,4 @@
+ #[cfg(unix)]
+ pub mod fd_passing;
++#[cfg(unix)]
+ pub mod worker;
+diff --git a/gnosis_vpn-lib/src/wg_tunnel/mod.rs b/gnosis_vpn-lib/src/wg_tunnel/mod.rs
+index ca1e99b..5d51f31 100644
+--- a/gnosis_vpn-lib/src/wg_tunnel/mod.rs
++++ b/gnosis_vpn-lib/src/wg_tunnel/mod.rs
+@@ -18,6 +18,8 @@ mod session;
+ mod stats;
+ #[cfg(unix)]
+ mod tun;
++#[cfg(windows)]
++mod tun_windows;
+ mod tunnel;
+ 
+ use neptun::noise::errors::WireGuardError;
+@@ -29,6 +31,8 @@ pub(crate) use stats::HISTORY_CAPACITY;
+ pub use stats::{TunnelStatsSample, WgTunnelStats};
+ #[cfg(unix)]
+ pub use tun::{PLATFORM_TUN_HEADER_LEN, TunReader, TunWriter, tun_endpoints};
++#[cfg(windows)]
++pub use tun_windows::{PacketDevice, TunReader, TunWriter, clear_packet_device, device_endpoints, set_packet_device};
+ pub use tunnel::{Outputs, TimerTick, TunnelEngine, WgTunnel};
+ 
+ /// Upper bound on a single IP packet or WireGuard datagram the pump buffers.
+diff --git a/gnosis_vpn-lib/src/wg_tunnel/tun_windows.rs b/gnosis_vpn-lib/src/wg_tunnel/tun_windows.rs
+new file mode 100644
+index 0000000..6d292e4
+--- /dev/null
++++ b/gnosis_vpn-lib/src/wg_tunnel/tun_windows.rs
+@@ -0,0 +1,105 @@
++//! Pump endpoint adapters over an in-process packet device (Windows).
++//!
++//! Windows has no TUN fd to pass between processes. The app that embeds the core owns
++//! the Wintun adapter and registers a [`PacketDevice`] with [`set_packet_device`]
++//! before it answers `SetupTunnel`; the connection runner then builds its reader and
++//! writer from that device here. One registered device serves every reconnect, so the
++//! adapter (and the TCP connections running through it) survives in-place reconnects.
++
++use std::io;
++use std::sync::{Arc, Mutex};
++use std::time::Duration;
++
++use tokio::sync::mpsc;
++
++use super::{TunReceiver, TunSender};
++
++/// A packet-oriented virtual network device: one call, one whole IP packet.
++pub trait PacketDevice: Send + Sync + 'static {
++    /// The next packet the system sent into the tunnel, or `Ok(None)` when none came
++    /// within `timeout`. An error means the device is gone.
++    fn recv_timeout(&self, timeout: Duration) -> io::Result<Option<Vec<u8>>>;
++    /// Injects one IP packet into the system's network stack.
++    fn send(&self, packet: &[u8]) -> io::Result<()>;
++}
++
++static DEVICE: Mutex<Option<Arc<dyn PacketDevice>>> = Mutex::new(None);
++
++/// Registers (or replaces) the device the next connection uses.
++pub fn set_packet_device(device: Arc<dyn PacketDevice>) {
++    *DEVICE.lock().unwrap_or_else(|e| e.into_inner()) = Some(device);
++}
++
++/// Forgets the registered device (the app is tearing the adapter down).
++pub fn clear_packet_device() {
++    *DEVICE.lock().unwrap_or_else(|e| e.into_inner()) = None;
++}
++
++/// Reader and writer over the registered device. The reader is fed by a dedicated
++/// thread that stops within one poll interval after the reader is dropped.
++pub fn device_endpoints() -> io::Result<(TunReader, TunWriter)> {
++    let device = DEVICE
++        .lock()
++        .unwrap_or_else(|e| e.into_inner())
++        .clone()
++        .ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, "no packet device registered"))?;
++    let (tx, rx) = mpsc::channel::<io::Result<Vec<u8>>>(512);
++    let reader_device = device.clone();
++    std::thread::Builder::new()
++        .name("tun-reader".into())
++        .spawn(move || {
++            loop {
++                if tx.is_closed() {
++                    break;
++                }
++                match reader_device.recv_timeout(Duration::from_millis(250)) {
++                    Ok(Some(packet)) => {
++                        if tx.blocking_send(Ok(packet)).is_err() {
++                            break;
++                        }
++                    }
++                    Ok(None) => {}
++                    Err(e) => {
++                        let _ = tx.blocking_send(Err(e));
++                        break;
++                    }
++                }
++            }
++        })?;
++    Ok((TunReader { rx }, TunWriter { device }))
++}
++
++pub struct TunReader {
++    rx: mpsc::Receiver<io::Result<Vec<u8>>>,
++}
++
++pub struct TunWriter {
++    device: Arc<dyn PacketDevice>,
++}
++
++#[async_trait::async_trait]
++impl TunReceiver for TunReader {
++    async fn recv(&mut self, buf: &mut [u8]) -> io::Result<Option<usize>> {
++        loop {
++            match self.rx.recv().await {
++                None => return Ok(None),
++                Some(Err(e)) => return Err(e),
++                Some(Ok(packet)) => {
++                    if packet.len() > buf.len() {
++                        tracing::debug!(len = packet.len(), "dropping oversized packet from the tunnel device");
++                        continue;
++                    }
++                    buf[..packet.len()].copy_from_slice(&packet);
++                    return Ok(Some(packet.len()));
++                }
++            }
++        }
++    }
++}
++
++#[async_trait::async_trait]
++impl TunSender for TunWriter {
++    async fn send(&mut self, packet: &[u8]) -> io::Result<()> {
++        self.device.send(packet)
++    }
++}
+diff --git a/gnosis_vpn-lib/src/worker_params.rs b/gnosis_vpn-lib/src/worker_params.rs
+index a28f629..dad5637 100644
+--- a/gnosis_vpn-lib/src/worker_params.rs
++++ b/gnosis_vpn-lib/src/worker_params.rs
+@@ -243,6 +243,15 @@ impl WorkerParams {
+     }
+ }
+ 
++#[cfg(windows)]
++fn log_path_diagnostics(path: &std::path::Path) {
++    match std::fs::metadata(path) {
++        Ok(meta) => tracing::error!(len = meta.len(), readonly = meta.permissions().readonly(), ?path, "pass file metadata"),
++        Err(e) => tracing::error!(error = %e, ?path, "pass file metadata error"),
++    }
++}
++
++#[cfg(unix)]
+ fn log_path_diagnostics(path: &std::path::Path) {
+     use std::os::unix::fs::MetadataExt;
+     match std::fs::metadata(path) {

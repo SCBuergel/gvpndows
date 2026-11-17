@@ -1,40 +1,64 @@
 #!/bin/bash
-# Runs ON the droplet: build the .exe, then smoke-test it under Wine (selftest + screenshot).
+# Runs ON the droplet. Builds inside a gnosis_vpn-client v1.0.0 checkout (/root/client) with our
+# Windows patch applied and this app added as the workspace member gnosis_vpn-windows, so the app
+# links the client core against the client's own pinned Cargo.lock.
+# MODE=check-lib  only `cargo check` gnosis_vpn-lib for Windows (find porting errors fast)
+# MODE=build      build gvpndows.exe, then smoke-test it under Wine
 set -euo pipefail
 . "$HOME/.cargo/env"
 t=$(date +%s); step() { n=$(date +%s); echo "STEP $1 $((n - t))"; t=$n; }
-TARGET=${TARGET:-x86_64-pc-windows-msvc}
-cd /root/src
+TARGET=${TARGET:-x86_64-pc-windows-msvc}; MODE=${MODE:-build}
+export XWIN_ACCEPT_LICENSE=1   # MSVC CRT + Windows SDK headers/libs, downloaded by cargo-xwin
+# Test builds: no LTO, parallel codegen (fat LTO takes ~18 min and is mostly single-threaded).
+export CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_PROFILE_RELEASE_STRIP=true
+# aws-lc-sys: use its prebuilt NASM objects when cross-compiling for Windows.
+export AWS_LC_SYS_PREBUILT_NASM=1
+
+# --- workspace: pristine v1.0.0 + patch + our crate ---
+cd /root/client
+git checkout -q -f v1.0.0 && git clean -qfdx -e target
+for p in /root/src/rust/patches/*.patch; do git apply "$p"; echo "applied $(basename "$p")"; done
+mkdir -p gnosis_vpn-windows .cargo
+cp -r /root/src/Cargo.toml /root/src/build.rs /root/src/src gnosis_vpn-windows/
+cp /root/src/.cargo/config.toml .cargo/config.toml
+LOCKED=--locked
+if [ -f /root/src/rust/Cargo.lock ]; then cp /root/src/rust/Cargo.lock Cargo.lock; elif [ "$MODE" = build ]; then LOCKED=; fi
+
 # Wintun (signed driver DLL from the WireGuard project), embedded into the .exe.
 WINTUN_ZIP=wintun-0.14.1.zip
 WINTUN_SHA256=07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51
 mkdir -p /root/cache
-[ -f /root/cache/$WINTUN_ZIP ] || curl -sSfL -o /root/cache/$WINTUN_ZIP.part https://www.wintun.net/builds/$WINTUN_ZIP
-[ -f /root/cache/$WINTUN_ZIP.part ] && mv /root/cache/$WINTUN_ZIP.part /root/cache/$WINTUN_ZIP
+[ -f /root/cache/$WINTUN_ZIP ] || { curl -sSfL -o /root/cache/$WINTUN_ZIP.part https://www.wintun.net/builds/$WINTUN_ZIP && mv /root/cache/$WINTUN_ZIP.part /root/cache/$WINTUN_ZIP; }
 echo "$WINTUN_SHA256  /root/cache/$WINTUN_ZIP" | sha256sum -c --quiet || { echo "wintun zip hash mismatch"; exit 1; }
-mkdir -p vendor && unzip -qo /root/cache/$WINTUN_ZIP -d vendor
-ls -l vendor/wintun/bin/amd64/wintun.dll
-export XWIN_ACCEPT_LICENSE=1   # MSVC CRT + Windows SDK headers/libs, downloaded by cargo-xwin
-GVPNDOWS_NTFY_TOPIC=${GVPNDOWS_NTFY_TOPIC:-} GVPNDOWS_COMMIT=${GVPNDOWS_COMMIT:-unknown} cargo xwin build --release --locked --target "$TARGET"
+mkdir -p gnosis_vpn-windows/vendor && unzip -qo /root/cache/$WINTUN_ZIP -d gnosis_vpn-windows/vendor
+step workspace
+
+if [ "$MODE" = check-lib ]; then
+    cargo xwin check --locked --target "$TARGET" -p gnosis_vpn-lib --message-format short
+    step check-lib
+    exit 0
+fi
+
+GVPNDOWS_NTFY_TOPIC=${GVPNDOWS_NTFY_TOPIC:-} GVPNDOWS_COMMIT=${GVPNDOWS_COMMIT:-unknown} \
+    cargo xwin build $LOCKED --release --target "$TARGET" -p gvpndows
 mkdir -p /root/out && rm -f /root/out/*
 cp "target/$TARGET/release/gvpndows.exe" /root/out/
+cp Cargo.lock /root/out/Cargo.lock   # pin: copied to rust/Cargo.lock for the next builds
 grep -c requireAdministrator /root/out/gvpndows.exe >/dev/null && echo "MANIFEST requireAdministrator embedded" || echo "MANIFEST missing"
 step build
 
 # Smoke test under Wine (not a Windows substitute: catches missing DLLs and crashes at start).
-if [ "$TARGET" = x86_64-pc-windows-msvc ]; then
-    export WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" WINEPREFIX=/root/wine
-    wine=$(command -v wine || command -v wine64 || echo /usr/lib/wine/wine64)
-    rc=0; timeout 120 "$wine" /root/out/gvpndows.exe --selftest || rc=$?
-    echo "WINE-SELFTEST rc=$rc"
-    find /root/wine -name gvpndows.log -exec cat {} \; | sed 's/^/  wine-log: /' || true
-    Xvfb :99 -screen 0 800x600x24 >/dev/null 2>&1 & xpid=$!
-    sleep 2
-    DISPLAY=:99 GVPNDOWS_AUTOCONNECT=1 timeout 60 "$wine" /root/out/gvpndows.exe >/dev/null 2>&1 & gpid=$!
-    sleep 25
-    DISPLAY=:99 import -window root /root/out/wine-screenshot.png && echo WINE-SCREENSHOT ok || echo WINE-SCREENSHOT failed
-    kill $gpid $xpid 2>/dev/null || true
-    find /root/wine -name gvpndows.log -exec cp {} /root/out/wine-gvpndows.log \;
-    step wine
-fi
+export WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" WINEPREFIX=/root/wine
+wine=$(command -v wine || command -v wine64 || echo /usr/lib/wine/wine64)
+rc=0; timeout 120 "$wine" /root/out/gvpndows.exe --selftest || rc=$?
+echo "WINE-SELFTEST rc=$rc"
+find /root/wine -name gvpndows.log -exec cat {} \; | sed 's/^/  wine-log: /' || true
+Xvfb :99 -screen 0 800x600x24 >/dev/null 2>&1 & xpid=$!
+sleep 2
+DISPLAY=:99 GVPNDOWS_AUTOCONNECT=1 timeout 60 "$wine" /root/out/gvpndows.exe >/dev/null 2>&1 & gpid=$!
+sleep 25
+DISPLAY=:99 import -window root /root/out/wine-screenshot.png && echo WINE-SCREENSHOT ok || echo WINE-SCREENSHOT failed
+kill $gpid $xpid 2>/dev/null || true
+find /root/wine -name gvpndows.log -exec cp {} /root/out/wine-gvpndows.log \;
+step wine
 sha256sum /root/out/gvpndows.exe
