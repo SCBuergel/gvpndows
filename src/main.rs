@@ -40,6 +40,12 @@ fn main() {
             Ok(_) => log::line("selftest: config parser ok"),
             Err(e) => log::line(format!("selftest: config parser error {e}")),
         }
+        if relay::available() {
+            match relay::selftest() {
+                Ok(()) => log::line("selftest: relay post ok"),
+                Err(e) => log::line(format!("selftest: relay post failed: {e}")),
+            }
+        }
         log::line("selftest ok");
         return;
     }

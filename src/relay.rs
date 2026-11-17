@@ -52,3 +52,8 @@ pub fn send_log() {
         crate::log::line(format!("log sent to the developer ({n} parts)"));
     });
 }
+
+/// Blocking post used by --selftest to prove the relay works from the Windows binary.
+pub fn selftest() -> Result<(), String> {
+    post("gvpndows selftest", "relay selftest from the Windows binary")
+}
