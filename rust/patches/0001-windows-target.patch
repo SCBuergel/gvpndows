@@ -20,10 +20,20 @@ index 07469a3..5cd77b4 100644
  pub fn user_dirs(home: &Path) -> UserDirs {
      UserDirs {
 diff --git a/gnosis_vpn-ipc/src/socket.rs b/gnosis_vpn-ipc/src/socket.rs
-index 86d4248..40d8308 100644
+index 86d4248..6e88424 100644
 --- a/gnosis_vpn-ipc/src/socket.rs
 +++ b/gnosis_vpn-ipc/src/socket.rs
-@@ -12,6 +12,9 @@ pub const DEFAULT_PATH: &str = "/run/gnosisvpn/gnosisvpn.sock";
+@@ -1,5 +1,8 @@
+ //! Newline-delimited JSON over the service's Unix socket: one `Envelope` line in, one `Reply` line out.
+-use std::io::{self, BufRead, BufReader, Write};
++#[cfg(unix)]
++use std::io::{BufRead, BufReader, Write};
++use std::io;
++#[cfg(unix)]
+ use std::os::unix::net::UnixStream;
+ use std::path::Path;
+ use std::time::Duration;
+@@ -12,6 +15,9 @@ pub const DEFAULT_PATH: &str = "/run/gnosisvpn/gnosisvpn.sock";
  /// macOS keeps the flat `/var/run` name next to the pid file newsyslog reads.
  #[cfg(target_os = "macos")]
  pub const DEFAULT_PATH: &str = "/var/run/gnosisvpn.sock";
@@ -33,6 +43,29 @@ index 86d4248..40d8308 100644
  pub const ENV_VAR: &str = "GNOSISVPN_SOCKET_PATH";
  
  /// A stuck service must not freeze a UI thread forever.
+@@ -35,7 +41,14 @@ pub enum CallError {
+     Io(#[from] io::Error),
+ }
+ 
++/// Windows: no service socket yet (the app embeds the core); a named pipe would go here.
++#[cfg(not(unix))]
++pub fn call(_socket_path: &Path, _request: Request) -> Result<Response, CallError> {
++    Err(CallError::ServiceNotRunning)
++}
++
+ /// Sends one request on a fresh connection; prefer the typed functions below.
++#[cfg(unix)]
+ pub fn call(socket_path: &Path, request: Request) -> Result<Response, CallError> {
+     if !socket_path.try_exists()? {
+         return Err(CallError::ServiceNotRunning);
+@@ -66,6 +79,7 @@ pub fn call(socket_path: &Path, request: Request) -> Result<Response, CallError>
+ }
+ 
+ /// Socket timeouts surface as `WouldBlock` on Unix, which reads as a bare EAGAIN to users.
++#[cfg(unix)]
+ fn timeout_or_io(error: io::Error) -> CallError {
+     match error.kind() {
+         io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut => CallError::Timeout,
 diff --git a/gnosis_vpn-lib/Cargo.toml b/gnosis_vpn-lib/Cargo.toml
 index 6298992..88e07c4 100644
 --- a/gnosis_vpn-lib/Cargo.toml
