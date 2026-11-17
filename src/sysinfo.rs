@@ -25,12 +25,18 @@ fn platform() -> Vec<String> {
     let s = |name| reg_string(HKEY_LOCAL_MACHINE, KEY, name).unwrap_or_else(|| "?".into());
     let ubr = reg_dword(HKEY_LOCAL_MACHINE, KEY, "UBR").map(|u| u.to_string()).unwrap_or_else(|| "?".into());
     let (process, native) = machines();
+    // ProductName still says "Windows 10" on Windows 11; the build number (>= 22000) tells them apart.
+    let build = s("CurrentBuildNumber");
+    let mut product = s("ProductName");
+    if build.parse::<u32>().is_ok_and(|b| b >= 22000) {
+        product = product.replace("Windows 10", "Windows 11");
+    }
     vec![
         format!(
             "windows: {} {} build {}.{} (edition id {})",
-            s("ProductName"),
+            product,
             s("DisplayVersion"),
-            s("CurrentBuildNumber"),
+            build,
             ubr,
             s("EditionID")
         ),
