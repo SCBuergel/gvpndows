@@ -134,6 +134,11 @@ impl App {
         // GVPNDOWS_AUTOCONNECT=1 clicks Connect once after start (screenshot check under Wine).
         let auto = std::env::var("GVPNDOWS_AUTOCONNECT").is_ok_and(|v| v == "1");
         let show_config = false;
+        // Start the Gnosis VPN core right away (identity, chain, HOPR node take a while).
+        #[cfg(windows)]
+        if let Err(e) = gnosis::start() {
+            log::line(format!("gnosis: not started: {e}"));
+        }
         App {
             tunnel: t,
             events: rx,
