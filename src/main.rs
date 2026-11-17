@@ -100,6 +100,7 @@ struct App {
     killswitch: bool,
     show_config: bool,
     show_wg: bool,
+    full_log: bool,
     destination: String,
     autoconnect_at: Option<Instant>,
 }
@@ -149,6 +150,7 @@ impl App {
             killswitch: false,
             show_config,
             show_wg: false,
+            full_log: false,
             destination: String::new(),
             autoconnect_at: auto.then(|| Instant::now() + Duration::from_secs(1)),
         }
@@ -247,8 +249,12 @@ impl App {
                     ui.selectable_value(&mut self.destination, id.clone(), label);
                 }
             });
-            if ui.add_enabled(!self.destination.is_empty() && mode == "running", egui::Button::new("Connect")).clicked() {
-                log::line(format!("user: gnosis connect {}", self.destination));
+            let current = data["connection"]["destination"].as_str().unwrap_or("").to_string();
+            let active = conn != "disconnected" && conn != "?";
+            let label = if active && current != self.destination { "Switch location" } else { "Connect" };
+            let can = !self.destination.is_empty() && mode == "running" && !(active && current == self.destination);
+            if ui.add_enabled(can, egui::Button::new(label)).clicked() {
+                log::line(format!("user: {} {}", label.to_lowercase(), self.destination));
                 gnosis::connect(&self.destination);
             }
             if ui.button("Disconnect").clicked() {
@@ -259,9 +265,34 @@ impl App {
                 std::thread::spawn(diag::run_checks);
             }
         });
-        ui.label(format!("Connection: {conn} {}", data["connection"]["destination"].as_str().unwrap_or("")));
+        let names = gnosis::dest_names(data);
+        let dest = data["connection"]["destination"].as_str().map(|d| names.get(d).cloned().unwrap_or(d.to_string())).unwrap_or_default();
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(format!("Connection: {conn} {dest}")).strong());
+            if relay::available() && ui.button("Send log to developer").clicked() {
+                relay::send_log();
+            }
+            ui.checkbox(&mut self.full_log, "Full log");
+        });
         ui.add_space(4.0);
     }
+}
+
+/// The plain log view: the app's own lines and the core's key events, without library chatter.
+fn readable(line: &str) -> bool {
+    const CORE_EVENTS: [&str; 9] = [
+        "deployed safe module",
+        "starting node",
+        "node account is ready",
+        "direct shield confirmed",
+        "stalled",
+        "reconnecting in place",
+        "session initiation attempt timed out",
+        "PANIC",
+        "ERROR gnosis_vpn",
+    ];
+    let core = line.contains(" INFO ") || line.contains(" WARN ") || line.contains(" ERROR ") || line.contains(" DEBUG ");
+    !core || CORE_EVENTS.iter().any(|e| line.contains(e))
 }
 
 /// Wei (as JSON string or number) to a decimal token amount with 4 decimals.
@@ -373,7 +404,7 @@ impl eframe::App for App {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
-                for l in log::snapshot() {
+                for l in log::snapshot().into_iter().filter(|l| self.full_log || readable(l)) {
                     ui.label(egui::RichText::new(l).monospace().size(12.0));
                 }
             });

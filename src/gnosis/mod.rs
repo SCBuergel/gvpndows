@@ -258,12 +258,66 @@ fn short(v: &serde_json::Value) -> String {
     if s.len() > 300 { format!("{}...", &s[..s.char_indices().nth(300).map(|(i, _)| i).unwrap_or(s.len())]) } else { s }
 }
 
+/// Exit id -> "GVPN-GER-1 (DE)" for readable log lines.
+pub fn dest_names(data: &serde_json::Value) -> std::collections::HashMap<String, String> {
+    data["destinations"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|d| {
+                    let x = &d["destination"];
+                    let id = x["id"].as_str().unwrap_or("?").to_string();
+                    let name = format!("{} ({})", x["meta"]["name"].as_str().unwrap_or(&id), x["geo"]["country"].as_str().unwrap_or("?"));
+                    (id, name)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// "connected to GVPN-GER-1 (DE), payment funded" etc.
+fn connection_summary(c: &serde_json::Value, names: &std::collections::HashMap<String, String>) -> String {
+    let kind = c["type"].as_str().unwrap_or("?");
+    let dest = c["destination"].as_str().map(|d| names.get(d).cloned().unwrap_or_else(|| d.to_string()));
+    let mut s = match (kind, &dest) {
+        ("connected", Some(d)) => format!("connected to {d}"),
+        ("connecting", Some(d)) => format!("connecting to {d}"),
+        ("reconnecting", Some(d)) => format!("reconnecting to {d}"),
+        (k, Some(d)) => format!("{k} ({d})"),
+        (k, None) => k.to_string(),
+    };
+    if let Some(p) = c["phase"]["type"].as_str() {
+        s.push_str(&format!(", step {p}"));
+    }
+    if let Some(p) = c["pix"]["phase"]["type"].as_str() {
+        s.push_str(&format!(", payment {p}"));
+    }
+    s
+}
+
+/// 30 s after a new connection (past the exit's first payment hold): check the exit IP, DNS and
+/// speed through the tunnel, then send the log to the developer. No clicks needed.
+fn auto_check(since: u64) {
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(30));
+        let still = STATUS.lock().unwrap().as_ref().map(|v| v["data"]["connection"]["since"].as_u64() == Some(since)).unwrap_or(false);
+        if !still {
+            log::line("auto check skipped: the connection changed");
+            return;
+        }
+        log::line("auto check: 30 s after connecting");
+        crate::diag::run_checks();
+        crate::relay::send_log();
+    });
+}
+
 /// Polls status every 3 s; logs run-mode and connection changes.
 fn start_status_poller() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         std::thread::spawn(|| {
             let (mut last_mode, mut last_conn) = (String::new(), String::new());
+            let mut last_connected_since = 0u64;
             loop {
                 std::thread::sleep(Duration::from_secs(3));
                 if TO_CORE.lock().unwrap().is_none() {
@@ -290,9 +344,16 @@ fn start_status_poller() {
                     log::line(format!("gnosis: run mode {mode_detail}"));
                     last_mode = mode_detail;
                 }
-                let conn = data["connection"].to_string();
+                // One line per real change (state, phase, exit, payment state), not per byte counter.
+                let c = &data["connection"];
+                let conn = connection_summary(c, &dest_names(data));
                 if conn != last_conn {
-                    log::line(format!("gnosis: connection {}", short(&data["connection"])));
+                    log::line(format!("gnosis: {conn}"));
+                    let since = c["since"].as_u64().unwrap_or(0);
+                    if c["type"] == "connected" && since != last_connected_since {
+                        last_connected_since = since;
+                        auto_check(since);
+                    }
                     last_conn = conn;
                 }
                 *STATUS.lock().unwrap() = Some(v);

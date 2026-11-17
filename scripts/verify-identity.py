@@ -6,7 +6,7 @@ import json, sys
 from pathlib import Path
 from eth_account import Account
 from eth_keyfile import decode_keyfile_json
-d, want = Path(sys.argv[1]), sys.argv[2]
+d, want = Path(sys.argv[1]), (sys.argv[2] if len(sys.argv) > 2 else "")
 raw = decode_keyfile_json(json.loads((d / "hopr.id").read_text()), (d / "hopr.pass").read_bytes().strip())
 # hopr-types (v2/v3 keystore): the plaintext is JSON {"packet_key", "chain_key", "babyjubjub_key"};
 # the node address is the Ethereum address of chain_key. (v1: the plaintext is the chain key.)
