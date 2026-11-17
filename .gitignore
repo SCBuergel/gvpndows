@@ -1,0 +1,7 @@
+/target
+/out
+*.part
+# secrets never live in this repo: WireGuard configs, node identities, tokens
+*.conf
+hopr.id
+hopr.pass
