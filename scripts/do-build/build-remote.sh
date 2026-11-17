@@ -5,10 +5,20 @@ set -euo pipefail
 t=$(date +%s); step() { n=$(date +%s); echo "STEP $1 $((n - t))"; t=$n; }
 TARGET=${TARGET:-x86_64-pc-windows-msvc}
 cd /root/src
+# Wintun (signed driver DLL from the WireGuard project), embedded into the .exe.
+WINTUN_ZIP=wintun-0.14.1.zip
+WINTUN_SHA256=07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51
+mkdir -p /root/cache
+[ -f /root/cache/$WINTUN_ZIP ] || curl -sSfL -o /root/cache/$WINTUN_ZIP.part https://www.wintun.net/builds/$WINTUN_ZIP
+[ -f /root/cache/$WINTUN_ZIP.part ] && mv /root/cache/$WINTUN_ZIP.part /root/cache/$WINTUN_ZIP
+echo "$WINTUN_SHA256  /root/cache/$WINTUN_ZIP" | sha256sum -c --quiet || { echo "wintun zip hash mismatch"; exit 1; }
+mkdir -p vendor && unzip -qo /root/cache/$WINTUN_ZIP -d vendor
+ls -l vendor/wintun/bin/amd64/wintun.dll
 export XWIN_ACCEPT_LICENSE=1   # MSVC CRT + Windows SDK headers/libs, downloaded by cargo-xwin
 GVPNDOWS_COMMIT=${GVPNDOWS_COMMIT:-unknown} cargo xwin build --release --locked --target "$TARGET"
 mkdir -p /root/out && rm -f /root/out/*
 cp "target/$TARGET/release/gvpndows.exe" /root/out/
+grep -c requireAdministrator /root/out/gvpndows.exe >/dev/null && echo "MANIFEST requireAdministrator embedded" || echo "MANIFEST missing"
 step build
 
 # Smoke test under Wine (not a Windows substitute: catches missing DLLs and crashes at start).

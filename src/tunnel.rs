@@ -1,5 +1,5 @@
-//! The one interface the UI talks to. Milestone 1 ships a stub backend; later milestones add
-//! plain WireGuard (Wintun + neptun) and the Gnosis VPN core behind the same trait.
+//! The one interface the UI talks to. Backends: plain WireGuard (Windows, milestone 2), a stub
+//! (other systems), later the Gnosis VPN core.
 
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::thread;
@@ -26,24 +26,42 @@ impl Status {
     }
 }
 
+pub struct ConnectParams {
+    pub config: crate::wgconf::WgConfig,
+    pub killswitch: bool,
+}
+
 pub trait Tunnel: Send {
     fn name(&self) -> &'static str;
     /// Starts connecting; status changes arrive through the `Sender` given at creation.
-    fn connect(&mut self);
+    fn connect(&mut self, params: ConnectParams);
     fn disconnect(&mut self);
+    /// Blocking teardown when the app exits.
+    fn shutdown(&mut self) {}
 }
 
 /// Stub backend: pretends to connect after a short delay. Proves the UI, threading and log path.
+#[allow(dead_code)] // used on non-Windows builds only
 pub struct StubTunnel {
     events: Sender<Status>,
     cancel: Option<Sender<()>>,
 }
 
+#[allow(dead_code)]
 impl StubTunnel {
-    pub fn new() -> (Self, Receiver<Status>) {
-        let (tx, rx) = channel();
-        (StubTunnel { events: tx, cancel: None }, rx)
+    pub fn new(events: Sender<Status>) -> Self {
+        StubTunnel { events, cancel: None }
     }
+}
+
+/// The backend for this platform, and the channel its status changes arrive on.
+pub fn platform_backend() -> (Box<dyn Tunnel>, Receiver<Status>) {
+    let (tx, rx) = channel();
+    #[cfg(windows)]
+    let t: Box<dyn Tunnel> = Box::new(crate::win::tunnel::WgTunnel::new(tx));
+    #[cfg(not(windows))]
+    let t: Box<dyn Tunnel> = Box::new(StubTunnel::new(tx));
+    (t, rx)
 }
 
 impl Tunnel for StubTunnel {
@@ -51,7 +69,7 @@ impl Tunnel for StubTunnel {
         "stub"
     }
 
-    fn connect(&mut self) {
+    fn connect(&mut self, _params: ConnectParams) {
         let events = self.events.clone();
         let (cancel_tx, cancel_rx) = channel::<()>();
         self.cancel = Some(cancel_tx);

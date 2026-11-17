@@ -7,10 +7,21 @@ publish = false
 
 [dependencies]
 eframe = { version = "=0.31.1", default-features = false, features = ["glow", "default_fonts"] }
+# Same WireGuard implementation and tag as gnosis_vpn-client v1.0.0 (noise only, no device feature).
+neptun = { git = "https://github.com/NordSecurity/neptun.git", tag = "v3.0.6", default-features = false }
+base64 = "0.22"
+getrandom = "0.2"
 
 [target.'cfg(windows)'.dependencies]
+wintun = "0.5"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_NetworkManagement_WindowsFilteringPlatform",
+    "Win32_Networking_WinSock",
+    "Win32_Security",
+    "Win32_System_Rpc",
     "Win32_System_LibraryLoader",
     "Win32_System_Registry",
     "Win32_System_SystemInformation",

@@ -5,7 +5,7 @@ export DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1
 t=$(date +%s); step() { n=$(date +%s); echo "STEP $1 $((n - t))"; t=$n; }
 cloud-init status --wait >/dev/null 2>&1 || true
 apt-get update -qq
-apt-get install -y -qq build-essential clang lld llvm cmake git curl ca-certificates pkg-config \
+apt-get install -y -qq build-essential clang lld llvm cmake git curl unzip ca-certificates pkg-config \
     wine64 xvfb imagemagick >/dev/null
 step apt
 curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable >/dev/null 2>&1

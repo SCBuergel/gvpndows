@@ -5,3 +5,4 @@
 *.conf
 hopr.id
 hopr.pass
+/vendor
