@@ -87,6 +87,10 @@ pub struct Root {
 }
 
 impl Root {
+    pub fn new(blokli_ip: Ipv4Addr) -> Self {
+        Root { blokli_ip: Some(blokli_ip), ..Default::default() }
+    }
+
     fn ensure_adapter(&mut self) -> Result<u64, String> {
         if let Some(a) = &self.adapter {
             return Ok(a.luid);

@@ -146,7 +146,7 @@ fn prepare_and_spawn() -> Result<(), String> {
     log::line(format!("gnosis: data in {}", dirs.data.display()));
     let params = WorkerParams::new(ConfigFileMode::Generated, AllowFlags::default(), blokli_url, blokli_ip, dirs, NETWORK.to_string());
     params.ensure_dirs().map_err(|e| format!("state dirs: {e}"))?;
-    *ROOT.lock().unwrap() = Some(root::Root { blokli_ip: Some(blokli_ip), ..Default::default() });
+    *ROOT.lock().unwrap() = Some(root::Root::new(blokli_ip));
 
     let (sender, mut from_core) = mpsc::channel(32);
     set_state(format!("starting (Blokli {blokli_ip}, network {NETWORK})"));
