@@ -18,6 +18,19 @@ export AWS_LC_SYS_PREBUILT_NASM=1
 cd /root/client
 git checkout -q -f v1.0.0 && git clean -qfdx -e target
 for p in /root/src/rust/patches/*.patch; do git apply "$p"; echo "applied $(basename "$p")"; done
+# Third-party crates that need a Windows fix: rust/crate-patches/<crate>-<version>.patch is applied
+# to a copy of the registry source and swapped in with [patch.crates-io].
+first=1
+for p in /root/src/rust/crate-patches/*.patch; do
+    [ -e "$p" ] || continue
+    cv=$(basename "$p" .patch); crate=${cv%-*}
+    src=$(ls -d /root/.cargo/registry/src/*/"$cv" | head -1)
+    rm -rf "patched/$cv"; mkdir -p patched; cp -r "$src" "patched/$cv"
+    patch -s -p1 -d "patched/$cv" < "$p"
+    [ $first = 1 ] && printf '\n[patch.crates-io]\n' >> Cargo.toml && first=0
+    printf '%s = { path = "patched/%s" }\n' "$crate" "$cv" >> Cargo.toml
+    echo "patched crate $cv"
+done
 mkdir -p gnosis_vpn-windows .cargo
 cp -r /root/src/Cargo.toml /root/src/build.rs /root/src/src gnosis_vpn-windows/
 cp /root/src/.cargo/config.toml .cargo/config.toml

@@ -1,0 +1,12 @@
+--- a/src/network_types/udp.rs
++++ b/src/network_types/udp.rs
+@@ -331,7 +331,9 @@
+                     let sock = socket2::Socket::new(domain, socket2::Type::DGRAM, None)?;
+                     if num_socks_to_bind > 1 {
+                         sock.set_reuse_address(true)?; // Needed for every next socket with non-wildcard IP
++                        // SO_REUSEPORT does not exist on Windows (gvpndows).
++                        #[cfg(unix)]
+                         sock.set_reuse_port(true)?; // Needed on Linux to evenly distribute datagrams
+                     }
+                     sock.set_nonblocking(true)?;
+                     sock.bind(&bound_addr.unwrap_or(binding_to).into())?;
