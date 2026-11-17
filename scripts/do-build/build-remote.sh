@@ -15,7 +15,7 @@ echo "$WINTUN_SHA256  /root/cache/$WINTUN_ZIP" | sha256sum -c --quiet || { echo 
 mkdir -p vendor && unzip -qo /root/cache/$WINTUN_ZIP -d vendor
 ls -l vendor/wintun/bin/amd64/wintun.dll
 export XWIN_ACCEPT_LICENSE=1   # MSVC CRT + Windows SDK headers/libs, downloaded by cargo-xwin
-GVPNDOWS_COMMIT=${GVPNDOWS_COMMIT:-unknown} cargo xwin build --release --locked --target "$TARGET"
+GVPNDOWS_NTFY_TOPIC=${GVPNDOWS_NTFY_TOPIC:-} GVPNDOWS_COMMIT=${GVPNDOWS_COMMIT:-unknown} cargo xwin build --release --locked --target "$TARGET"
 mkdir -p /root/out && rm -f /root/out/*
 cp "target/$TARGET/release/gvpndows.exe" /root/out/
 grep -c requireAdministrator /root/out/gvpndows.exe >/dev/null && echo "MANIFEST requireAdministrator embedded" || echo "MANIFEST missing"

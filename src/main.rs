@@ -3,6 +3,7 @@
 
 mod diag;
 mod log;
+mod relay;
 mod sysinfo;
 mod tunnel;
 mod wgconf;
@@ -82,13 +83,24 @@ impl App {
             }
         };
         log::line(format!("this app's WireGuard public key: {public_key}"));
-        let (config_text, config_note) = match std::fs::read_to_string(wgconf::config_path()) {
-            Ok(s) => (s, format!("loaded {}", wgconf::config_path().display())),
-            Err(_) => (wgconf::TEMPLATE.to_string(), "no config saved yet: paste the server's values".into()),
+        // A peer.conf next to the .exe (shipped in the test zip) replaces the saved config, so
+        // nothing has to be typed on the laptop.
+        let beside_exe = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("peer.conf")));
+        let shipped = beside_exe.as_ref().and_then(|p| std::fs::read_to_string(p).ok().map(|s| (p.clone(), s)));
+        let (config_text, config_note) = match shipped {
+            Some((p, s)) if wgconf::WgConfig::parse(&s).is_ok() => {
+                let _ = std::fs::write(wgconf::config_path(), &s);
+                (s, format!("loaded {} (saved)", p.display()))
+            }
+            _ => match std::fs::read_to_string(wgconf::config_path()) {
+                Ok(s) => (s, format!("loaded {}", wgconf::config_path().display())),
+                Err(_) => (wgconf::TEMPLATE.to_string(), "no config: put peer.conf next to the .exe".into()),
+            },
         };
+        log::line(format!("config: {config_note}"));
         // GVPNDOWS_AUTOCONNECT=1 clicks Connect once after start (screenshot check under Wine).
         let auto = std::env::var("GVPNDOWS_AUTOCONNECT").is_ok_and(|v| v == "1");
-        let show_config = !wgconf::config_path().exists();
+        let show_config = false;
         App {
             tunnel: t,
             events: rx,
@@ -163,6 +175,9 @@ impl eframe::App for App {
                     ctx.copy_text(self.public_key.clone());
                     log::line("public key copied to clipboard");
                 }
+                if relay::available() && ui.button("Send key to developer").on_hover_text("posts the public key to the developer's ntfy.sh topic").clicked() {
+                    relay::send_key(self.public_key.clone());
+                }
             });
             ui.horizontal(|ui| {
                 ui.toggle_value(&mut self.show_config, "WireGuard config");
@@ -170,6 +185,9 @@ impl eframe::App for App {
                 if ui.small_button("Copy log").clicked() {
                     ctx.copy_text(log::snapshot().join("\n"));
                     log::line("log copied to clipboard");
+                }
+                if relay::available() && ui.button("Send log to developer").on_hover_text("posts this run's log to the developer's ntfy.sh topic").clicked() {
+                    relay::send_log();
                 }
             });
             if self.show_config {

@@ -11,6 +11,8 @@ eframe = { version = "=0.31.1", default-features = false, features = ["glow", "d
 neptun = { git = "https://github.com/NordSecurity/neptun.git", tag = "v3.0.6", default-features = false }
 base64 = "0.22"
 getrandom = "0.2"
+# HTTPS to ntfy.sh for "send key/log to developer" (rustls + bundled roots, no OS TLS).
+ureq = { version = "2.12", default-features = false, features = ["tls"] }
 
 [target.'cfg(windows)'.dependencies]
 wintun = "0.5"
