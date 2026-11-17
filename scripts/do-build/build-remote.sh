@@ -53,7 +53,7 @@ if [ "$MODE" = check ]; then
     exit 0
 fi
 
-GVPNDOWS_NTFY_TOPIC=${GVPNDOWS_NTFY_TOPIC:-} GVPNDOWS_COMMIT=${GVPNDOWS_COMMIT:-unknown} \
+GVPNDOWS_BACKUP_PUBKEY=${GVPNDOWS_BACKUP_PUBKEY:-} GVPNDOWS_NTFY_TOPIC=${GVPNDOWS_NTFY_TOPIC:-} GVPNDOWS_COMMIT=${GVPNDOWS_COMMIT:-unknown} \
     cargo xwin build $LOCKED --release --target "$TARGET" -p gvpndows
 mkdir -p /root/out && rm -f /root/out/*
 cp "target/$TARGET/release/gvpndows.exe" /root/out/
