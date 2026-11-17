@@ -75,4 +75,12 @@ DISPLAY=:99 import -window root /root/out/wine-screenshot.png && echo WINE-SCREE
 kill $gpid $xpid 2>/dev/null || true
 find /root/wine -name gvpndows.log -exec cp {} /root/out/wine-gvpndows.log \;
 step wine
+# Core start under Wine, if the data files were uploaded to /root/gnosis (CORE_TEST=1).
+if [ "${CORE_TEST:-0}" = 1 ] && [ -d /root/gnosis ]; then
+    rm -rf /root/coretest && mkdir -p /root/coretest && cp /root/out/gvpndows.exe /root/coretest/ && ln -s /root/gnosis /root/coretest/gnosis
+    rc=0; timeout 200 "$wine" /root/coretest/gvpndows.exe --core-test || rc=$?
+    echo "WINE-CORETEST rc=$rc"
+    find /root/wine -name gvpndows.log -exec cp {} /root/out/wine-coretest.log \;
+    step coretest
+fi
 sha256sum /root/out/gvpndows.exe

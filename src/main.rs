@@ -57,6 +57,24 @@ fn main() {
         return;
     }
 
+    // --core-test: start the Gnosis VPN core headless, log its progress for 150 s, exit
+    // (build check under Wine: identity, Blokli over HTTPS, HOPR node start).
+    #[cfg(windows)]
+    if std::env::args().any(|a| a == "--core-test") {
+        if let Err(e) = gnosis::start() {
+            log::line(format!("core-test: start failed: {e}"));
+            return;
+        }
+        for _ in 0..30 {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            let mode = gnosis::STATUS.lock().unwrap().as_ref().map(|v| v["data"]["run_mode"]["type"].to_string());
+            log::line(format!("core-test: core {:?}, run mode {:?}", gnosis::CORE_STATE.lock().unwrap(), mode));
+        }
+        gnosis::shutdown();
+        log::line("core-test done");
+        return;
+    }
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Gnosis VPN (gvpndows test)")
