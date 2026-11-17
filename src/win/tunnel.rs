@@ -212,8 +212,11 @@ fn up(p: &ConnectParams, events: &Sender<Status>, cleanup: &mut Cleanup) -> Resu
     {
         let mut buf = vec![0u8; BUF];
         if let TunnResult::WriteToNetwork(b) = tunn.lock().unwrap().format_handshake_initiation(&mut buf, false) {
-            sock.send(b).map_err(|e| format!("sending handshake: {e}"))?;
-            log::line("handshake initiation sent");
+            let n = sock.send(b).map_err(|e| format!("sending handshake: {e}"))?;
+            log::line(format!(
+                "handshake initiation sent ({n} bytes from {} to {endpoint})",
+                sock.local_addr().map(|a| a.to_string()).unwrap_or_default()
+            ));
         }
     }
 
@@ -223,13 +226,19 @@ fn up(p: &ConnectParams, events: &Sender<Status>, cleanup: &mut Cleanup) -> Resu
         let (session, tunn, sock, stop) = (session.clone(), tunn.clone(), sock.clone(), stop.clone());
         threads.push(std::thread::spawn(move || {
             let mut buf = vec![0u8; BUF];
+            let mut last_err = Instant::now() - Duration::from_secs(60);
             while !stop.load(Ordering::Relaxed) {
                 let pkt = match session.receive_blocking() {
                     Ok(p) => p,
                     Err(_) => break, // session shut down
                 };
                 if let TunnResult::WriteToNetwork(b) = tunn.lock().unwrap().encapsulate(pkt.bytes(), &mut buf) {
-                    let _ = sock.send(b);
+                    if let Err(e) = sock.send(b) {
+                        if last_err.elapsed() > Duration::from_secs(10) {
+                            log::line(format!("tun->udp: send failed: {e}"));
+                            last_err = Instant::now();
+                        }
+                    }
                 }
             }
         }));
@@ -281,12 +290,22 @@ fn up(p: &ConnectParams, events: &Sender<Status>, cleanup: &mut Cleanup) -> Resu
             let mut buf = vec![0u8; BUF];
             let (mut connected, mut last_log) = (false, Instant::now());
             let mut last_err = Instant::now() - Duration::from_secs(60);
+            let mut timer_sends = 0u64;
             while !stop.load(Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_millis(250));
                 let mut t = tunn.lock().unwrap();
                 match t.update_timers(&mut buf) {
                     TunnResult::WriteToNetwork(b) => {
-                        let _ = sock.send(b);
+                        let len = b.len();
+                        let res = sock.send(b);
+                        timer_sends += 1;
+                        if !connected || res.is_err() {
+                            match res {
+                                // 148 bytes = handshake initiation; log each retry until connected
+                                Ok(_) => log::line(format!("timer: sent {len} bytes (#{timer_sends}, handshake retry or keepalive)")),
+                                Err(e) => log::line(format!("timer: UDP send failed: {e}")),
+                            }
+                        }
                     }
                     TunnResult::Err(e) => {
                         if last_err.elapsed() > Duration::from_secs(10) {
