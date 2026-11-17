@@ -2,7 +2,7 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use windows_sys::Win32::NetworkManagement::IpHelper::{
-    CreateIpForwardEntry2, CreateUnicastIpAddressEntry, DeleteIpForwardEntry2, GetBestRoute2, GetIpInterfaceEntry,
+    CreateIpForwardEntry2, CreateUnicastIpAddressEntry, DeleteIpForwardEntry2, DeleteUnicastIpAddressEntry, GetBestRoute2, GetIpInterfaceEntry,
     InitializeIpForwardEntry, InitializeIpInterfaceEntry, InitializeUnicastIpAddressEntry, SetIpInterfaceEntry,
     MIB_IPFORWARD_ROW2, MIB_IPINTERFACE_ROW, MIB_UNICASTIPADDRESS_ROW,
 };
@@ -62,6 +62,21 @@ pub fn add_address(if_luid: u64, addr: IpAddr, prefix_len: u8) -> Result<(), Str
             return Ok(());
         }
         check(&format!("adding address {addr}/{prefix_len}"), rc)
+    }
+}
+
+pub fn delete_address(if_luid: u64, addr: IpAddr, prefix_len: u8) -> Result<(), String> {
+    unsafe {
+        let mut row: MIB_UNICASTIPADDRESS_ROW = std::mem::zeroed();
+        InitializeUnicastIpAddressEntry(&mut row);
+        row.InterfaceLuid = luid(if_luid);
+        row.Address = sockaddr(addr);
+        row.OnLinkPrefixLength = prefix_len;
+        let rc = DeleteUnicastIpAddressEntry(&row);
+        if rc == ERROR_NOT_FOUND {
+            return Ok(());
+        }
+        check(&format!("deleting address {addr}/{prefix_len}"), rc)
     }
 }
 

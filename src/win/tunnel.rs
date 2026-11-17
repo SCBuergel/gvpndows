@@ -22,7 +22,7 @@ const BUF: usize = 65_536 + 256;
 
 static WINTUN: OnceLock<Result<wintun::Wintun, String>> = OnceLock::new();
 
-fn wintun() -> Result<wintun::Wintun, String> {
+pub(crate) fn wintun() -> Result<wintun::Wintun, String> {
     WINTUN
         .get_or_init(|| {
             let path = log::dir().join("wintun.dll");

@@ -6,3 +6,4 @@
 hopr.id
 hopr.pass
 /vendor
+/Cargo.lock

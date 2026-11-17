@@ -9,6 +9,10 @@ pub fn available() -> bool {
     TOPIC.is_some_and(|t| !t.is_empty())
 }
 
+pub fn post_text(title: &str, body: &str) -> Result<(), String> {
+    post(title, body)
+}
+
 fn post(title: &str, body: &str) -> Result<(), String> {
     let topic = TOPIC.ok_or("no relay topic in this build")?;
     ureq::post(&format!("https://ntfy.sh/{topic}"))

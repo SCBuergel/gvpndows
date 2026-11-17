@@ -2,7 +2,7 @@
 # Runs ON the droplet. Builds inside a gnosis_vpn-client v1.0.0 checkout (/root/client) with our
 # Windows patch applied and this app added as the workspace member gnosis_vpn-windows, so the app
 # links the client core against the client's own pinned Cargo.lock.
-# MODE=check-lib  only `cargo check` gnosis_vpn-lib for Windows (find porting errors fast)
+# MODE=check      only `cargo check` the app (and with it the patched core) for Windows: fast errors
 # MODE=build      build gvpndows.exe, then smoke-test it under Wine
 set -euo pipefail
 . "$HOME/.cargo/env"
@@ -22,7 +22,7 @@ mkdir -p gnosis_vpn-windows .cargo
 cp -r /root/src/Cargo.toml /root/src/build.rs /root/src/src gnosis_vpn-windows/
 cp /root/src/.cargo/config.toml .cargo/config.toml
 LOCKED=--locked
-if [ -f /root/src/rust/Cargo.lock ]; then cp /root/src/rust/Cargo.lock Cargo.lock; elif [ "$MODE" = build ]; then LOCKED=; fi
+if [ -f /root/src/rust/Cargo.lock ]; then cp /root/src/rust/Cargo.lock Cargo.lock; else LOCKED=; fi
 
 # Wintun (signed driver DLL from the WireGuard project), embedded into the .exe.
 WINTUN_ZIP=wintun-0.14.1.zip
@@ -33,9 +33,10 @@ echo "$WINTUN_SHA256  /root/cache/$WINTUN_ZIP" | sha256sum -c --quiet || { echo 
 mkdir -p gnosis_vpn-windows/vendor && unzip -qo /root/cache/$WINTUN_ZIP -d gnosis_vpn-windows/vendor
 step workspace
 
-if [ "$MODE" = check-lib ]; then
-    cargo xwin check --locked --target "$TARGET" -p gnosis_vpn-lib --message-format short
-    step check-lib
+if [ "$MODE" = check ]; then
+    cargo xwin check $LOCKED --target "$TARGET" -p gvpndows --message-format short
+    mkdir -p /root/out && cp Cargo.lock /root/out/Cargo.lock
+    step check
     exit 0
 fi
 

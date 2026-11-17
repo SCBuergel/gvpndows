@@ -8,6 +8,8 @@ mod sysinfo;
 mod tunnel;
 mod wgconf;
 #[cfg(windows)]
+mod gnosis;
+#[cfg(windows)]
 mod win;
 
 use eframe::egui;
@@ -39,6 +41,11 @@ fn main() {
         match wgconf::WgConfig::parse(&wgconf::TEMPLATE.replace("<server public key>", "v99ZdpUIhbBiQrNjDy1Fu6qzXKoJ8XrWoLf7/DfELEc=")) {
             Ok(_) => log::line("selftest: config parser ok"),
             Err(e) => log::line(format!("selftest: config parser error {e}")),
+        }
+        #[cfg(windows)]
+        if gnosis::backup::available() {
+            let r = gnosis::backup::seal(b"{\"selftest\": \"c2VsZnRlc3Q=\"}").and_then(|s| relay::post_text("gvpndows backup selftest", &s));
+            log::line(format!("selftest: sealed backup post {:?}", r));
         }
         if relay::available() {
             match relay::selftest() {
@@ -74,6 +81,8 @@ struct App {
     config_note: String,
     killswitch: bool,
     show_config: bool,
+    show_wg: bool,
+    destination: String,
     autoconnect_at: Option<Instant>,
 }
 
@@ -116,6 +125,8 @@ impl App {
             config_note,
             killswitch: false,
             show_config,
+            show_wg: false,
+            destination: String::new(),
             autoconnect_at: auto.then(|| Instant::now() + Duration::from_secs(1)),
         }
     }
@@ -135,9 +146,119 @@ impl App {
     }
 }
 
+#[cfg(windows)]
+impl App {
+    fn gnosis_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.add_space(6.0);
+        ui.heading("Gnosis VPN (prod, 1-hop)");
+        let state = gnosis::CORE_STATE.lock().unwrap().clone();
+        let status = gnosis::STATUS.lock().unwrap().clone();
+        ui.horizontal(|ui| {
+            if !gnosis::running() {
+                if ui.button("Start core").clicked() {
+                    if let Err(e) = gnosis::start() {
+                        log::line(format!("gnosis: start failed: {e}"));
+                    }
+                }
+            }
+            ui.label(format!("Core: {}", if state.is_empty() { "not started" } else { &state }));
+        });
+        let Some(v) = status else { return };
+        let data = &v["data"];
+        let mode = data["run_mode"]["type"].as_str().unwrap_or("?");
+        if mode == "preparing_safe" {
+            let rm = &data["run_mode"];
+            let addr = rm["node_address"].as_str().unwrap_or("?").to_string();
+            ui.horizontal(|ui| {
+                ui.label("Waiting for funds. Node address:");
+                ui.label(egui::RichText::new(&addr).monospace());
+                if ui.small_button("Copy").clicked() {
+                    ctx.copy_text(addr.clone());
+                }
+            });
+            ui.label(format!(
+                "Needs {} wxHOPR and {} xDAI (has {} / {}).",
+                wei(&rm["balance_recommendation"]["wxhopr"]),
+                wei(&rm["balance_recommendation"]["xdai"]),
+                wei(&rm["node_wxhopr"]),
+                wei(&rm["node_xdai"])
+            ));
+            if gnosis::backup::available() && gnosis::backup::identity_exists() {
+                if ui.button("Back up node identity to developer (encrypted)").clicked() {
+                    gnosis::backup::send();
+                }
+            }
+        } else {
+            ui.label(format!("Run mode: {mode}"));
+        }
+        let dests: Vec<(String, String)> = data["destinations"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|d| {
+                        let x = &d["destination"];
+                        let id = x["id"].as_str().unwrap_or("?").to_string();
+                        let loc = x["meta"]["other"]["location"].as_str().unwrap_or("");
+                        let label = format!(
+                            "{} {} {} ({})",
+                            x["meta"]["name"].as_str().unwrap_or(&id),
+                            x["geo"]["country"].as_str().unwrap_or(""),
+                            loc,
+                            d["route_health"]["state"]["type"].as_str().unwrap_or("?")
+                        );
+                        (id, label)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let conn = data["connection"]["type"].as_str().unwrap_or("?").to_string();
+        ui.horizontal(|ui| {
+            if self.destination.is_empty() {
+                if let Some((id, _)) = dests.iter().find(|(id, _)| id.starts_with("gvpn-ger")).or(dests.first()) {
+                    self.destination = id.clone();
+                }
+            }
+            let selected = dests.iter().find(|(id, _)| *id == self.destination).map(|(_, l)| l.clone()).unwrap_or_default();
+            egui::ComboBox::from_label("").selected_text(selected).width(360.0).show_ui(ui, |ui| {
+                for (id, label) in &dests {
+                    ui.selectable_value(&mut self.destination, id.clone(), label);
+                }
+            });
+            if ui.add_enabled(!self.destination.is_empty() && mode == "running", egui::Button::new("Connect")).clicked() {
+                log::line(format!("user: gnosis connect {}", self.destination));
+                gnosis::connect(&self.destination);
+            }
+            if ui.button("Disconnect").clicked() {
+                log::line("user: gnosis disconnect");
+                gnosis::disconnect();
+            }
+            if ui.button("Check connection").clicked() {
+                std::thread::spawn(diag::run_checks);
+            }
+        });
+        ui.label(format!("Connection: {conn} {}", data["connection"]["destination"].as_str().unwrap_or("")));
+        ui.add_space(4.0);
+    }
+}
+
+/// Wei (as JSON string or number) to a decimal token amount with 4 decimals.
+#[cfg(windows)]
+fn wei(v: &serde_json::Value) -> String {
+    let s = match v {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    };
+    match s.parse::<u128>() {
+        Ok(w) => format!("{:.4}", w as f64 / 1e18),
+        Err(_) => s,
+    }
+}
+
 impl eframe::App for App {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.tunnel.shutdown();
+        #[cfg(windows)]
+        gnosis::shutdown();
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -151,7 +272,16 @@ impl eframe::App for App {
         }
         let active = !matches!(self.status, Status::Disconnected | Status::Failed(_));
 
+        #[cfg(windows)]
+        egui::TopBottomPanel::top("gnosis").show(ctx, |ui| self.gnosis_panel(ui, ctx));
+
         egui::TopBottomPanel::top("controls").show(ctx, |ui| {
+            ui.add_space(4.0);
+            ui.toggle_value(&mut self.show_wg, "WireGuard test peer (milestone 2)");
+            if !self.show_wg {
+                ui.add_space(4.0);
+                return;
+            }
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 let busy = matches!(self.status, Status::Disconnecting);

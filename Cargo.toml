@@ -13,6 +13,19 @@ base64 = "0.22"
 getrandom = "0.2"
 # HTTPS to ntfy.sh for "send key/log to developer" (rustls + bundled roots, no OS TLS).
 ureq = { version = "2.12", default-features = false, features = ["tls"] }
+# Identity backup sealing (same versions as already in the client's lock).
+chacha20poly1305 = "0.10"
+sha2 = "0.10"
+
+# The Gnosis VPN client core. This crate is built as a member of a gnosis_vpn-client v1.0.0
+# checkout (patched for Windows, see rust/patches and scripts/do-build/build-remote.sh).
+gnosis_vpn-lib = { path = "../gnosis_vpn-lib" }
+gnosis_vpn-ipc = { path = "../gnosis_vpn-ipc" }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt", "env-filter", "registry"] }
+serde_json = { workspace = true }
+url = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 wintun = "0.5"
@@ -32,8 +45,4 @@ windows-sys = { version = "0.59", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
-[profile.release]
-opt-level = "s"
-lto = "thin"
-codegen-units = 4
-strip = "debuginfo"
+# Profiles come from the client workspace root (fast overrides in build-remote.sh).
