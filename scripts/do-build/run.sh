@@ -19,10 +19,10 @@ step() { n=$(date +%s); echo "STEP $1 $((n - t))"; t=$n; }
 id=""; ip=""
 teardown() {
     rc=$?
-    if [ -n "$id" ] && [ "${KEEP:-0}" = 1 ] && [ "$rc" = 0 ]; then
+    if [ -n "$id" ] && [ "${KEEP:-0}" = 1 ] && [ -n "$ip" ]; then
         printf 'id=%s\nip=%s\nname=%s\nknown_hosts=%s\nt0=%s\n' "$id" "$ip" "$NAME" "$KNOWN_HOSTS" "$t0" > "$ST/current"
-        echo "KEPT droplet $id at $ip (deadline $NAME armed); iterate: scripts/do-build/rebuild.sh, end: scripts/do-build/down.sh"
-        exit 0
+        echo "KEPT droplet (exit $rc) $id at $ip (deadline $NAME armed); iterate: scripts/do-build/rebuild.sh, end: scripts/do-build/down.sh"
+        exit $rc
     fi
     if [ -n "$id" ]; then
         if python3 -I scripts/do-build/droplet.py delete "$id"; then

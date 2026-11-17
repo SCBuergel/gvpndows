@@ -1,7 +1,7 @@
 //! The one interface the UI talks to. Milestone 1 ships a stub backend; later milestones add
 //! plain WireGuard (Wintun + neptun) and the Gnosis VPN core behind the same trait.
 
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::Duration;
 
@@ -58,8 +58,8 @@ impl Tunnel for StubTunnel {
         thread::spawn(move || {
             let _ = events.send(Status::Connecting);
             crate::log::line("stub: connecting (simulated, 2 s)");
-            // recv_timeout returns Ok or Disconnected when cancelled, Timeout when not.
-            if cancel_rx.recv_timeout(Duration::from_secs(2)).is_err_and(|e| e.is_timeout()) {
+            // Ok or Disconnected means cancelled; Timeout means the simulated connect finished.
+            if matches!(cancel_rx.recv_timeout(Duration::from_secs(2)), Err(RecvTimeoutError::Timeout)) {
                 crate::log::line("stub: connected (no traffic is routed)");
                 let _ = events.send(Status::Connected { detail: "stub, no tunnel".into() });
             }
