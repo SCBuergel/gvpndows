@@ -1,6 +1,22 @@
 # Shared by install.ps1 and uninstall.ps1: visible, time-bounded steps (nothing waits silently).
 
 $script:t0 = Get-Date
+
+# A click into a console window starts a QuickEdit selection, which pauses the script until Enter
+# is pressed (it looked like a hang). Turn QuickEdit off for this window only.
+try {
+  Add-Type -Namespace GnosisVpn -Name Console -MemberDefinition @'
+[DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int n);
+[DllImport("kernel32.dll")] public static extern bool GetConsoleMode(IntPtr h, out uint m);
+[DllImport("kernel32.dll")] public static extern bool SetConsoleMode(IntPtr h, uint m);
+'@
+  $h = [GnosisVpn.Console]::GetStdHandle(-10)   # STD_INPUT_HANDLE
+  $m = 0
+  if ([GnosisVpn.Console]::GetConsoleMode($h, [ref]$m)) {
+    # clear ENABLE_QUICK_EDIT_MODE (0x40), keep ENABLE_EXTENDED_FLAGS (0x80) so the change applies
+    [void][GnosisVpn.Console]::SetConsoleMode($h, ($m -band (-bnot 0x40)) -bor 0x80)
+  }
+} catch { }
 function Step([string]$text) {
   $script:stepStart = Get-Date
   Write-Host ("[{0:HH:mm:ss}] {1} ..." -f (Get-Date), $text)
