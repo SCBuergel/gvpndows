@@ -49,7 +49,7 @@ mkdir -p gnosis_vpn-windows/vendor && unzip -qo /root/cache/$WINTUN_ZIP -d gnosi
 step workspace
 
 # Unit tests of the platform-independent logic (src/pure.rs), on the Linux host: fast, no client workspace.
-(cd /root/src/rust/pure-tests && cargo test -q 2>&1 | tail -4) | tee /root/pure-tests.log
+(cd /root/src/rust/pure-tests && cargo test -q --locked 2>&1 | tail -4) | tee /root/pure-tests.log
 grep -q "test result: ok" /root/pure-tests.log || { echo "PURE-TESTS failed"; exit 1; }
 echo "PURE-TESTS ok"; step pure-tests
 

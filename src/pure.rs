@@ -53,6 +53,12 @@ pub fn hopr_leak_dst(p: &[u8], own_ports: &[u16]) -> Option<Ipv4Addr> {
     own_ports.contains(&sport).then(|| Ipv4Addr::new(p[16], p[17], p[18], p[19]))
 }
 
+/// Owners the service trusts for its state folders: SYSTEM and Administrators. A folder owned by
+/// anyone else may hold files planted by that user (a node key whose secret they know).
+pub fn owner_trusted(sid: &str) -> bool {
+    matches!(sid, "S-1-5-18" | "S-1-5-32-544")
+}
+
 /// Splits the log into relay messages of at most `chunk` bytes, at line ends; a longer line is
 /// cut to `chunk` bytes (on a character boundary).
 pub fn chunk_log(text: &str, chunk: usize) -> Vec<String> {
@@ -135,6 +141,7 @@ mod tests {
         assert_eq!(hopr_leak_dst(&udp(9091, [1, 2, 3, 4], 5)[..21], &own), None, "truncated");
         let mut bad_ihl = udp(9091, [1, 2, 3, 4], 5);
         bad_ihl[0] = 0x42;
+        bad_ihl[8..10].copy_from_slice(&9091u16.to_be_bytes()); // where IHL 2 would put the source port
         assert_eq!(hopr_leak_dst(&bad_ihl, &own), None, "IHL below 5");
     }
 
@@ -149,6 +156,15 @@ mod tests {
         assert_eq!(parts.len(), 1);
         assert!(parts[0].len() <= 3500);
         assert!(chunk_log("", 3500).is_empty());
+    }
+
+    #[test]
+    fn only_system_and_administrators_own_state_folders() {
+        assert!(owner_trusted("S-1-5-18"));
+        assert!(owner_trusted("S-1-5-32-544"));
+        assert!(!owner_trusted("S-1-5-21-1-2-3-1001"), "a local user");
+        assert!(!owner_trusted("S-1-5-32-545"), "Users");
+        assert!(!owner_trusted(""));
     }
 
     #[test]

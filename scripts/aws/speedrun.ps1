@@ -13,7 +13,7 @@ function Pipe($req) {
 Remove-Item "$out\*" -ErrorAction SilentlyContinue
 foreach ($x in $Exits.Split(",")) {
   Get-Process GnosisVPN -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep 2
-  Log "=== $x: app starts and connects"
+  Log "=== ${x}: app starts and connects"
   Start-Process C:\gv\app\GnosisVPN.exe -ArgumentList "--click-connect", $x
   $t0 = Get-Date; $dest = $null
   while (((Get-Date) - $t0).TotalSeconds -lt 300) {
@@ -21,16 +21,16 @@ foreach ($x in $Exits.Split(",")) {
     $c = (Pipe '{"type":"x_state"}').status.data.connection
     if ($c.type -eq "connected" -and $c.destination -like "*$x*") { $dest = $c.destination; break }
   }
-  if (-not $dest) { Log "$x: not connected within 5 min; skipped"; continue }
+  if (-not $dest) { Log "${x}: not connected within 5 min; skipped"; continue }
   $ip = try { Invoke-RestMethod http://api.ipify.org -TimeoutSec 15 } catch { "?" }
-  Log ("$x: connected to $dest after {0:0} s, public IP $ip" -f ((Get-Date) - $t0).TotalSeconds)
+  Log ("${x}: connected to $dest after {0:0} s, public IP $ip" -f ((Get-Date) - $t0).TotalSeconds)
   Start-Sleep 5
-  Log "$x: download $Bytes bytes (max $MaxS s)"
-  C:\gv\speedtest\speedtest.exe down "https://speed.cloudflare.com/__down?bytes=$Bytes" $Bytes $MaxS "$out\$x-down.csv" | Select-Object -Last 1 | % { Log "$x: $_" }
-  Log "$x: upload $Bytes bytes (max $MaxS s)"
-  C:\gv\speedtest\speedtest.exe up "https://speed.cloudflare.com/__up" $Bytes $MaxS "$out\$x-up.csv" | Select-Object -Last 1 | % { Log "$x: $_" }
+  Log "${x}: download $Bytes bytes (max $MaxS s)"
+  C:\gv\speedtest\speedtest.exe down "https://speed.cloudflare.com/__down?bytes=$Bytes" $Bytes $MaxS "$out\$x-down.csv" | Select-Object -Last 1 | % { Log "${x}: $_" }
+  Log "${x}: upload $Bytes bytes (max $MaxS s)"
+  C:\gv\speedtest\speedtest.exe up "https://speed.cloudflare.com/__up" $Bytes $MaxS "$out\$x-up.csv" | Select-Object -Last 1 | % { Log "${x}: $_" }
   $p = (Pipe '{"type":"x_state"}').status.data.connection.pix
-  Log ("$x: PIX phase " + $p.phase.type + ", chunks paid " + $p.chunks_paid + ", failed " + $p.chunks_failed)
+  Log ("${x}: PIX phase " + $p.phase.type + ", chunks paid " + $p.chunks_paid + ", failed " + $p.chunks_failed)
 }
 Pipe '{"type":"disconnect"}' | Out-Null
 Get-Process GnosisVPN -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue

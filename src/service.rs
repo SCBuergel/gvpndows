@@ -20,7 +20,9 @@ use std::ptr::{null, null_mut};
 use std::sync::mpsc;
 use std::sync::Mutex;
 use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, LocalFree, ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE, NO_ERROR};
-use windows_sys::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SetNamedSecurityInfoW, SE_FILE_OBJECT};
+use windows_sys::Win32::Security::Authorization::{
+    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, GetNamedSecurityInfoW, SetNamedSecurityInfoW, SE_FILE_OBJECT,
+};
 use windows_sys::Win32::Security::{
     AdjustTokenPrivileges, GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, LookupPrivilegeValueW, ACL, DACL_SECURITY_INFORMATION,
     OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, SE_PRIVILEGE_ENABLED,
@@ -39,8 +41,10 @@ use windows_sys::Win32::System::Services::{
 
 pub const PIPE: &str = r"\\.\pipe\gnosisvpn";
 const SERVICE_NAME: &str = "GnosisVPN";
-/// SYSTEM and Administrators: full; interactively signed-in users: read and write (they run the app).
-const PIPE_SDDL: &str = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)";
+/// SYSTEM and Administrators: full; interactively signed-in users: read plus FILE_WRITE_DATA only
+/// (0x12008b = FILE_GENERIC_READ | FILE_WRITE_DATA). Generic write would include
+/// FILE_CREATE_PIPE_INSTANCE, letting users add server instances of the pipe.
+const PIPE_SDDL: &str = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x12008b;;;IU)";
 
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -62,10 +66,48 @@ pub fn use_program_data() -> Result<(), String> {
     enable_privileges(&["SeTakeOwnershipPrivilege", "SeRestorePrivilege"]);
     for name in ["GnosisVPN", "gvpndows"] {
         let dir = Path::new(&pd).join(name);
+        // A folder (or a link) someone else made is never adopted: whatever is inside it, such as
+        // a planted hopr.id/hopr.pass, could be theirs. It is moved aside and the service starts fresh.
+        if let Ok(meta) = std::fs::symlink_metadata(&dir) {
+            let link = is_reparse_point(&meta);
+            let owner = owner_sid(&dir);
+            if link || !owner.as_deref().is_some_and(crate::pure::owner_trusted) {
+                let aside = Path::new(&pd).join(format!("{name}.untrusted-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)));
+                std::fs::rename(&dir, &aside).map_err(|e| format!("moving aside {} (owner {owner:?}, link {link}): {e}", dir.display()))?;
+                eprintln!("gvpndows: {} was not created by the service (owner {owner:?}, link {link}); moved to {}", dir.display(), aside.display());
+            }
+        }
         std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         secure_tree(&dir)?;
     }
     Ok(())
+}
+
+fn is_reparse_point(meta: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    meta.file_attributes() & 0x400 != 0 // FILE_ATTRIBUTE_REPARSE_POINT (junctions, symlinks)
+}
+
+/// The owner of a file or folder as a SID string ("S-1-5-18" for SYSTEM).
+fn owner_sid(path: &Path) -> Option<String> {
+    unsafe {
+        let p = wide(&path.to_string_lossy());
+        let (mut owner, mut sd): (PSID, PSECURITY_DESCRIPTOR) = (null_mut(), null_mut());
+        if GetNamedSecurityInfoW(p.as_ptr(), SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION, &mut owner, null_mut(), null_mut(), null_mut(), &mut sd) != 0 {
+            return None;
+        }
+        let mut s: *mut u16 = null_mut();
+        let ok = ConvertSidToStringSidW(owner, &mut s) != 0;
+        let out = ok.then(|| {
+            let len = (0..).take_while(|&i| *s.add(i) != 0).count();
+            String::from_utf16_lossy(std::slice::from_raw_parts(s, len))
+        });
+        if !s.is_null() {
+            LocalFree(s as _);
+        }
+        LocalFree(sd as _);
+        out
+    }
 }
 
 fn enable_privileges(names: &[&str]) {
@@ -121,6 +163,11 @@ fn secure_tree(dir: &Path) -> Result<(), String> {
     while let Some(d) = stack.pop() {
         for e in std::fs::read_dir(&d).map_err(|e| format!("{}: {e}", d.display()))?.flatten() {
             let p = e.path();
+            // never follow a junction or symlink: securing its target would lock others out of it
+            if std::fs::symlink_metadata(&p).map(|m| is_reparse_point(&m)).unwrap_or(true) {
+                std::fs::remove_file(&p).or_else(|_| std::fs::remove_dir(&p)).map_err(|e| format!("removing link {}: {e}", p.display()))?;
+                continue;
+            }
             if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                 set_security(&p, DIR_SDDL)?;
                 stack.push(p);

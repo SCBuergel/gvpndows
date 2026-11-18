@@ -5,6 +5,8 @@ set -euo pipefail
 RUN=$1; CFG=${2:-Release}
 REPO=$(cd "$(dirname "$0")/../.." && pwd); W="$REPO/scripts/aws/winssh.sh"
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+# the committed generated files must match the prototype they are generated from
+if [ -d "$HOME/mobile-UI" ]; then python3 -I "$REPO/winui/tools/gen_assets.py" --check | tail -1 || { echo "GEN-ASSETS out of date: run winui/tools/gen_assets.py"; exit 1; }; fi
 (cd "$REPO" && zip -qr "$TMP/winui.zip" winui -x 'winui/*/bin/*' 'winui/*/obj/*')
 WINSCP=1 "$W" "$RUN" "$TMP/winui.zip" HOST:C:/gv/winui.zip
 "$W" "$RUN" "
