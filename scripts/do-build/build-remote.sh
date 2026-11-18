@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs ON the droplet. Builds inside a gnosis_vpn-client checkout (CLIENT_REF, default: main at 00641e58, version 1.0.1) (/root/client) with our
+# Runs ON the droplet. Builds inside a gnosis_vpn-client checkout (CLIENT_REF, default: main at 7d745df7, version 1.0.1) (/root/client) with our
 # Windows patch applied and this app added as the workspace member gnosis_vpn-windows, so the app
 # links the client core against the client's own pinned Cargo.lock.
 # MODE=check      only `cargo check` the app (and with it the patched core) for Windows: fast errors
@@ -16,7 +16,7 @@ export AWS_LC_SYS_PREBUILT_NASM=1
 
 # --- workspace: pristine client + patch + our crate ---
 cd /root/client
-CLIENT_REF=${CLIENT_REF:-00641e581cbf15da1378b72acec4b9f1f357b018}
+CLIENT_REF=${CLIENT_REF:-7d745df7d6e471ca74152652316bdf7d608e1f36}
 git cat-file -e "$CLIENT_REF^{commit}" 2>/dev/null || git fetch -q origin main
 git checkout -q -f "$CLIENT_REF" && git clean -qfdx -e target && echo "client $(git log --oneline -1)"
 for p in /root/src/rust/patches/*.patch; do git apply "$p"; echo "applied $(basename "$p")"; done
@@ -38,6 +38,17 @@ cp -r /root/src/Cargo.toml /root/src/build.rs /root/src/src gnosis_vpn-windows/
 cp /root/src/.cargo/config.toml .cargo/config.toml
 LOCKED=--locked
 if [ -f /root/src/rust/Cargo.lock ]; then cp /root/src/rust/Cargo.lock Cargo.lock; else LOCKED=; fi
+# BUMP=1: move the HOPR dependencies to their newest compatible versions (hopr-strategy to the
+# version 0002-hopr-strategy-9.2.patch asks for, hoprnet master and edgli main to their branch
+# heads), build without --locked, and return the new lock in /root/out (copy it to rust/Cargo.lock).
+if [ "${BUMP:-0}" = 1 ]; then
+    cargo update -p hopr-strategy 2>&1 | grep -E "Updating|Adding|Removing|Locking" | grep -iE "hopr|curvy|edgli" || true
+    cargo update -p edgli 2>&1 | grep -E "Updating|Adding|Removing" | grep -iE "hopr|curvy|edgli" | head -20 || true
+    cargo update -p hopr-lib 2>&1 | grep -E "Updating|Adding|Removing" | head -40 || true
+    grep -o 'git+https://github.com/hoprnet/[a-z-]*?branch=[a-z]*#[0-9a-f]\{8\}' Cargo.lock | sort -u | sed 's/^/BUMPED /'
+    grep -A1 -E '^name = "(hopr-strategy|curvy-sdk|edgli|hopr-lib)"$' Cargo.lock | grep version | sed 's/^/BUMPED /'
+    LOCKED=
+fi
 
 # Wintun (signed driver DLL from the WireGuard project), embedded into the .exe.
 WINTUN_ZIP=wintun-0.14.1.zip

@@ -17,9 +17,9 @@ scp -q "${SSH_OPTS[@]}" scripts/do-build/build-remote.sh "root@$ip:/root/upload/
 TOPIC=$(cat "$HOME/.config/gvpndows-secrets/ntfy-topic" 2>/dev/null || true)
 # Public half of the identity-backup key (the private half never leaves this machine).
 BACKUP_PUB=$(cat "$HOME/.config/gvpndows-secrets/backup-x25519.pub" 2>/dev/null || true)
-ssh_ "CORE_TEST=${CORE_TEST:-0} MODE=${MODE:-build} GVPNDOWS_BACKUP_PUBKEY=$BACKUP_PUB GVPNDOWS_NTFY_TOPIC=$TOPIC GVPNDOWS_COMMIT=$COMMIT nohup bash -c 'bash /root/upload/build-remote.sh; echo JOB-EXIT \$?' > /root/build.log 2>&1 &"
+ssh_ "BUMP=${BUMP:-0} CORE_TEST=${CORE_TEST:-0} MODE=${MODE:-build} GVPNDOWS_BACKUP_PUBKEY=$BACKUP_PUB GVPNDOWS_NTFY_TOPIC=$TOPIC GVPNDOWS_COMMIT=$COMMIT nohup bash -c 'bash /root/upload/build-remote.sh; echo JOB-EXIT \$?' > /root/build.log 2>&1 &"
 until ssh_ 'grep -q "^JOB-EXIT" /root/build.log' 2>/dev/null; do sleep 10; done
-ssh_ 'grep -E "^(error|STEP|JOB-EXIT|WINE|MANIFEST|  wine-log)|: error|error\[|^warning: unused|gvpndows.exe$" /root/build.log | grep -v "^error: could not compile" | sort -u' || true
+ssh_ 'grep -E "^(error|STEP|JOB-EXIT|WINE|MANIFEST|BUMPED|client |PURE|  wine-log)|: error|error\[|^warning: unused|gvpndows.exe$" /root/build.log | grep -v "^error: could not compile" | sort -u' || true
 ssh_ 'grep -q "^JOB-EXIT 0" /root/build.log' || { ssh_ 'grep -A14 "^error" /root/build.log | head -150; tail -25 /root/build.log'; exit 1; }
 [ "${MODE:-build}" = build ] || exit 0
 mkdir -p out
