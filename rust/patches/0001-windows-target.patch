@@ -1,5 +1,5 @@
 diff --git a/gnosis_vpn-ipc/src/dirs.rs b/gnosis_vpn-ipc/src/dirs.rs
-index 07469a3..5cd77b4 100644
+index 07469a31..5cd77b48 100644
 --- a/gnosis_vpn-ipc/src/dirs.rs
 +++ b/gnosis_vpn-ipc/src/dirs.rs
 @@ -21,6 +21,16 @@ pub fn user_dirs(home: &Path) -> UserDirs {
@@ -20,7 +20,7 @@ index 07469a3..5cd77b4 100644
  pub fn user_dirs(home: &Path) -> UserDirs {
      UserDirs {
 diff --git a/gnosis_vpn-ipc/src/socket.rs b/gnosis_vpn-ipc/src/socket.rs
-index 86d4248..6e88424 100644
+index 86d42480..6e884240 100644
 --- a/gnosis_vpn-ipc/src/socket.rs
 +++ b/gnosis_vpn-ipc/src/socket.rs
 @@ -1,5 +1,8 @@
@@ -67,7 +67,7 @@ index 86d4248..6e88424 100644
      match error.kind() {
          io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut => CallError::Timeout,
 diff --git a/gnosis_vpn-lib/Cargo.toml b/gnosis_vpn-lib/Cargo.toml
-index 6298992..88e07c4 100644
+index 6298992c..88e07c46 100644
 --- a/gnosis_vpn-lib/Cargo.toml
 +++ b/gnosis_vpn-lib/Cargo.toml
 @@ -40,9 +40,9 @@ tracing.workspace            = true
@@ -82,7 +82,7 @@ index 6298992..88e07c4 100644
  rustix = { workspace = true }
  
 diff --git a/gnosis_vpn-lib/src/app_nap.rs b/gnosis_vpn-lib/src/app_nap.rs
-index a8f5221..7b0b108 100644
+index a8f5221e..7b0b1085 100644
 --- a/gnosis_vpn-lib/src/app_nap.rs
 +++ b/gnosis_vpn-lib/src/app_nap.rs
 @@ -36,7 +36,7 @@ mod macos {
@@ -104,7 +104,7 @@ index a8f5221..7b0b108 100644
  
  #[cfg(test)]
 diff --git a/gnosis_vpn-lib/src/connection/up/runner.rs b/gnosis_vpn-lib/src/connection/up/runner.rs
-index 689b2f1..c560b1e 100644
+index 689b2f19..c560b1e1 100644
 --- a/gnosis_vpn-lib/src/connection/up/runner.rs
 +++ b/gnosis_vpn-lib/src/connection/up/runner.rs
 @@ -352,12 +352,20 @@ async fn prepare_pump(
@@ -135,7 +135,7 @@ index 689b2f1..c560b1e 100644
      let preshared = registration.preshared_key();
      let preshared = if preshared.is_empty() { None } else { Some(preshared) };
 diff --git a/gnosis_vpn-lib/src/dirs.rs b/gnosis_vpn-lib/src/dirs.rs
-index d13c9df..2f7d2da 100644
+index d13c9dfb..2f7d2da1 100644
 --- a/gnosis_vpn-lib/src/dirs.rs
 +++ b/gnosis_vpn-lib/src/dirs.rs
 @@ -1,4 +1,5 @@
@@ -167,7 +167,7 @@ index d13c9df..2f7d2da 100644
  
  #[cfg(test)]
 diff --git a/gnosis_vpn-lib/src/geoip.rs b/gnosis_vpn-lib/src/geoip.rs
-index 4238698..4993d77 100644
+index 4238698a..4993d77f 100644
 --- a/gnosis_vpn-lib/src/geoip.rs
 +++ b/gnosis_vpn-lib/src/geoip.rs
 @@ -10,6 +10,9 @@ use std::path::{Path, PathBuf};
@@ -181,7 +181,7 @@ index 4238698..4993d77 100644
  pub use gnosis_vpn_ipc::{CountryCode, Geo, GeoSource};
  
 diff --git a/gnosis_vpn-lib/src/hopr/config.rs b/gnosis_vpn-lib/src/hopr/config.rs
-index ed5182b..5ed2dab 100644
+index c81bb1d9..ac26fb36 100644
 --- a/gnosis_vpn-lib/src/hopr/config.rs
 +++ b/gnosis_vpn-lib/src/hopr/config.rs
 @@ -48,13 +48,11 @@ pub async fn from_path(path: PathBuf) -> Result<HoprLibConfig, Error> {
@@ -204,7 +204,7 @@ index ed5182b..5ed2dab 100644
  }
  
 diff --git a/gnosis_vpn-lib/src/hopr/identity.rs b/gnosis_vpn-lib/src/hopr/identity.rs
-index b19c366..588729b 100644
+index b19c366e..588729bb 100644
 --- a/gnosis_vpn-lib/src/hopr/identity.rs
 +++ b/gnosis_vpn-lib/src/hopr/identity.rs
 @@ -3,6 +3,7 @@ use rand::distr::Alphanumeric;
@@ -230,7 +230,7 @@ index b19c366..588729b 100644
      let old_mode = std::fs::metadata(file)?.permissions().mode() & 0o777;
      let readable_by_others = old_mode & 0o077 != 0;
 diff --git a/gnosis_vpn-lib/src/hopr/pix_config.rs b/gnosis_vpn-lib/src/hopr/pix_config.rs
-index ec444bd..be9b5eb 100644
+index ec444bdb..be9b5eb1 100644
 --- a/gnosis_vpn-lib/src/hopr/pix_config.rs
 +++ b/gnosis_vpn-lib/src/hopr/pix_config.rs
 @@ -11,6 +11,9 @@ use url::Url;
@@ -244,7 +244,7 @@ index ec444bd..be9b5eb 100644
  /// curvy-witnesscalc reads the proving files' directory from this variable only.
  pub const CURVY_ZK_DIR_ENV: &str = "CURVY_ZK_KEYS_DIR";
 diff --git a/gnosis_vpn-lib/src/killswitch/mod.rs b/gnosis_vpn-lib/src/killswitch/mod.rs
-index 9cf29b2..e260b25 100644
+index 9cf29b2b..e260b250 100644
 --- a/gnosis_vpn-lib/src/killswitch/mod.rs
 +++ b/gnosis_vpn-lib/src/killswitch/mod.rs
 @@ -34,5 +34,8 @@ cfg_if::cfg_if! {
@@ -258,7 +258,7 @@ index 9cf29b2..e260b25 100644
  }
 diff --git a/gnosis_vpn-lib/src/killswitch/noop.rs b/gnosis_vpn-lib/src/killswitch/noop.rs
 new file mode 100644
-index 0000000..e5674ab
+index 00000000..e5674ab1
 --- /dev/null
 +++ b/gnosis_vpn-lib/src/killswitch/noop.rs
 @@ -0,0 +1,40 @@
@@ -303,7 +303,7 @@ index 0000000..e5674ab
 +    }
 +}
 diff --git a/gnosis_vpn-lib/src/lib.rs b/gnosis_vpn-lib/src/lib.rs
-index d4d2f7a..cf92256 100644
+index d4d2f7a1..cf92256c 100644
 --- a/gnosis_vpn-lib/src/lib.rs
 +++ b/gnosis_vpn-lib/src/lib.rs
 @@ -20,6 +20,7 @@ pub mod socket;
@@ -315,7 +315,7 @@ index d4d2f7a..cf92256 100644
  pub mod worker_params;
  
 diff --git a/gnosis_vpn-lib/src/logging.rs b/gnosis_vpn-lib/src/logging.rs
-index 8917750..d7e6da3 100644
+index 8917750f..d7e6da36 100644
 --- a/gnosis_vpn-lib/src/logging.rs
 +++ b/gnosis_vpn-lib/src/logging.rs
 @@ -3,6 +3,7 @@ use tracing_subscriber::fmt::writer::BoxMakeWriter;
@@ -344,7 +344,7 @@ index 8917750..d7e6da3 100644
  }
  
 diff --git a/gnosis_vpn-lib/src/ping.rs b/gnosis_vpn-lib/src/ping.rs
-index 4fcd727..d4a2c2f 100644
+index 4fcd7274..d4a2c2f3 100644
 --- a/gnosis_vpn-lib/src/ping.rs
 +++ b/gnosis_vpn-lib/src/ping.rs
 @@ -62,6 +62,9 @@ async fn ping_using_cmd(opts: &Options) -> Result<Duration, Error> {
@@ -367,7 +367,7 @@ index 4fcd727..d4a2c2f 100644
          }
      }
 diff --git a/gnosis_vpn-lib/src/socket/mod.rs b/gnosis_vpn-lib/src/socket/mod.rs
-index 62e6043..eea4832 100644
+index 62e60436..eea48328 100644
 --- a/gnosis_vpn-lib/src/socket/mod.rs
 +++ b/gnosis_vpn-lib/src/socket/mod.rs
 @@ -1,3 +1,4 @@
@@ -376,7 +376,7 @@ index 62e6043..eea4832 100644
 +#[cfg(unix)]
  pub mod worker;
 diff --git a/gnosis_vpn-lib/src/wg_tunnel/mod.rs b/gnosis_vpn-lib/src/wg_tunnel/mod.rs
-index ca1e99b..5d51f31 100644
+index ca1e99b0..5d51f312 100644
 --- a/gnosis_vpn-lib/src/wg_tunnel/mod.rs
 +++ b/gnosis_vpn-lib/src/wg_tunnel/mod.rs
 @@ -18,6 +18,8 @@ mod session;
@@ -399,7 +399,7 @@ index ca1e99b..5d51f31 100644
  /// Upper bound on a single IP packet or WireGuard datagram the pump buffers.
 diff --git a/gnosis_vpn-lib/src/wg_tunnel/tun_windows.rs b/gnosis_vpn-lib/src/wg_tunnel/tun_windows.rs
 new file mode 100644
-index 0000000..6d292e4
+index 00000000..6d292e4e
 --- /dev/null
 +++ b/gnosis_vpn-lib/src/wg_tunnel/tun_windows.rs
 @@ -0,0 +1,105 @@
@@ -509,10 +509,10 @@ index 0000000..6d292e4
 +    }
 +}
 diff --git a/gnosis_vpn-lib/src/worker_params.rs b/gnosis_vpn-lib/src/worker_params.rs
-index a28f629..198a5b4 100644
+index b4a34d71..2eee59f7 100644
 --- a/gnosis_vpn-lib/src/worker_params.rs
 +++ b/gnosis_vpn-lib/src/worker_params.rs
-@@ -111,10 +111,12 @@ impl WorkerParams {
+@@ -232,10 +232,12 @@ impl WorkerParams {
              Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                  tracing::debug!(?path, "no identity pass file - generating one next to the identity");
                  let pw = identity::generate_pass();
@@ -529,8 +529,8 @@ index a28f629..198a5b4 100644
                      .open(&path)
                      .await
                      .map_err(|e| {
-@@ -243,6 +245,15 @@ impl WorkerParams {
-     }
+@@ -391,6 +393,15 @@ fn valid_network_name(name: &str) -> bool {
+     single_plain && components.next().is_none() && !name.contains('\0')
  }
  
 +#[cfg(windows)]

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs ON the droplet. Builds inside a gnosis_vpn-client v1.0.0 checkout (/root/client) with our
+# Runs ON the droplet. Builds inside a gnosis_vpn-client checkout (CLIENT_REF, default: main at 00641e58, version 1.0.1) (/root/client) with our
 # Windows patch applied and this app added as the workspace member gnosis_vpn-windows, so the app
 # links the client core against the client's own pinned Cargo.lock.
 # MODE=check      only `cargo check` the app (and with it the patched core) for Windows: fast errors
@@ -14,9 +14,11 @@ export CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CA
 # aws-lc-sys: use its prebuilt NASM objects when cross-compiling for Windows.
 export AWS_LC_SYS_PREBUILT_NASM=1
 
-# --- workspace: pristine v1.0.0 + patch + our crate ---
+# --- workspace: pristine client + patch + our crate ---
 cd /root/client
-git checkout -q -f v1.0.0 && git clean -qfdx -e target
+CLIENT_REF=${CLIENT_REF:-00641e581cbf}
+git cat-file -e "$CLIENT_REF^{commit}" 2>/dev/null || git fetch -q origin main
+git checkout -q -f "$CLIENT_REF" && git clean -qfdx -e target && echo "client $(git log --oneline -1)"
 for p in /root/src/rust/patches/*.patch; do git apply "$p"; echo "applied $(basename "$p")"; done
 # Third-party crates that need a Windows fix: rust/crate-patches/<crate>-<version>.patch is applied
 # to a copy of the registry source and swapped in with [patch.crates-io].
