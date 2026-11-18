@@ -1,0 +1,10 @@
+s01-simple-light s01-simple-light-static
+s01-d-light s01-d-light-static
+s08-d-dark s08-d-dark-static
+s14-payout-simple-light s14-payout-simple-light-static
+i1-simple-light i1-simple-light-static
+e1-simple-dark e1-simple-dark-static
+s01-pick-d-light s01-pick-d-light-static
+s01-set-simple-light s01-set-simple-light-static
+arc-simple-light arc-simple-light-static
+s01-d-narrow-light s01-d-narrow-light-static

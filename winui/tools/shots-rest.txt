@@ -1,0 +1,15 @@
+s13-d-light s13-d-light-static
+s13-simple-dark s13-simple-dark-static
+s13-simple-light s13-simple-light-static
+s14-d-dark s14-d-dark-static
+s14-d-light s14-d-light-static
+s14-payout-d-dark s14-payout-d-dark-static
+s14-payout-d-light s14-payout-d-light-static
+s14-payout-simple-dark s14-payout-simple-dark-static
+s14-payout-simple-light s14-payout-simple-light-static
+s14-simple-dark s14-simple-dark-static
+s14-simple-light s14-simple-light-static
+s18c-d-dark s18c-d-dark-static
+s18c-d-light s18c-d-light-static
+s18c-simple-dark s18c-simple-dark-static
+s18c-simple-light s18c-simple-light-static
