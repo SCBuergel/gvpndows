@@ -140,6 +140,12 @@ pub fn flush_final(max: Duration) {
     }
 }
 
+/// Hosts the relay posts to: routed outside the tunnel, so logs still arrive while the exit holds
+/// the tunnel's traffic (exactly when they are needed).
+pub fn bypass_hosts() -> Vec<&'static str> {
+    if available() { vec!["ntfy.sh"] } else { Vec::new() }
+}
+
 /// Older callers (the e2e check, the egui app's button): same as flush_now.
 pub fn send_log() {
     let _ = flush_now();

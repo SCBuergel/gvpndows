@@ -161,11 +161,37 @@ pub struct Root {
     bypass_peers: BTreeSet<Ipv4Addr>,
     tunnel_routes: Vec<net::Route>,
     pub blokli_ip: Option<Ipv4Addr>,
+    /// Other services the core itself must reach while the exit holds the tunnel's traffic for a
+    /// payment (the Curvy relayer that submits the payment, ...): resolved once at start, before any
+    /// tunnel exists, and routed outside the tunnel like Blokli and the HOPR peers.
+    pub service_ips: Vec<Ipv4Addr>,
+}
+
+/// Hosts the core contacts directly (not through HOPR) that must never go through the tunnel: the
+/// exit holds inbound tunnel traffic until it sees a payment, and the payment itself goes through
+/// the Curvy relayer. Through the tunnel that would deadlock (the "waiting for payment" stall).
+pub const CORE_SERVICE_HOSTS: [&str; 1] = ["api.curvy.box"];
+
+fn resolve_v4(host: &str) -> Vec<Ipv4Addr> {
+    use std::net::ToSocketAddrs;
+    match (host, 443).to_socket_addrs() {
+        Ok(a) => a.filter_map(|s| match s.ip() { IpAddr::V4(v) => Some(v), _ => None }).collect(),
+        Err(e) => {
+            log::line(format!("gnosis: cannot resolve {host} for the tunnel bypass: {e}"));
+            Vec::new()
+        }
+    }
 }
 
 impl Root {
     pub fn new(blokli_ip: Ipv4Addr) -> Self {
-        Root { blokli_ip: Some(blokli_ip), ..Default::default() }
+        let mut hosts: Vec<&str> = CORE_SERVICE_HOSTS.to_vec();
+        hosts.extend(crate::relay::bypass_hosts()); // DEBUG FEATURE ONLY: the log relay (none in release builds)
+        let mut service_ips: Vec<Ipv4Addr> = hosts.iter().flat_map(|h| resolve_v4(h)).collect();
+        service_ips.sort();
+        service_ips.dedup();
+        log::line(format!("gnosis: outside the tunnel besides Blokli and the HOPR peers: {} ({})", hosts.join(", "), service_ips.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(", ")));
+        Root { blokli_ip: Some(blokli_ip), service_ips, ..Default::default() }
     }
 
     fn ensure_adapter(&mut self) -> Result<u64, String> {
@@ -231,6 +257,13 @@ impl Root {
         if let Some(b) = self.blokli_ip {
             peers.insert(b);
         }
+        if self.service_ips.is_empty() && self.tunnel_routes.is_empty() {
+            // not resolved at start (no network yet): try again while DNS still goes direct
+            let mut hosts: Vec<&str> = CORE_SERVICE_HOSTS.to_vec();
+            hosts.extend(crate::relay::bypass_hosts());
+            self.service_ips = hosts.iter().flat_map(|h| resolve_v4(h)).collect();
+        }
+        peers.extend(self.service_ips.iter().copied());
         for p in peers.difference(&self.bypass_peers.clone()).copied().collect::<Vec<_>>() {
             self.add_bypass(IpAddr::V4(p), 32, wan);
         }

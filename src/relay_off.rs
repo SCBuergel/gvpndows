@@ -25,6 +25,10 @@ pub fn selftest() -> Result<(), String> {
 
 pub fn start_stream() {}
 
+pub fn bypass_hosts() -> Vec<&'static str> {
+    Vec::new()
+}
+
 pub fn flush_final(_max: std::time::Duration) {}
 
 pub fn flush_now() -> Result<(), String> {
