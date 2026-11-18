@@ -1,19 +1,22 @@
 # Gnosis VPN for Windows: installs (or updates) the service and the app. Run by Install.cmd as admin.
+# Every step prints what it does and how long it took; no step waits without a limit.
 param([switch]$NoLaunch)
 $ErrorActionPreference = "Stop"
 $here = $PSScriptRoot
+. (Join-Path $here "common.ps1")
 $app = Join-Path $env:ProgramFiles "Gnosis VPN"
-function Say($m) { Write-Host $m; Add-Content -Path (Join-Path $env:TEMP "gnosisvpn-install.log") -Value ("{0:u} {1}" -f (Get-Date), $m) }
-Say "Gnosis VPN install from $here"
+Write-Host "Installing Gnosis VPN from $here`n"
+Log "install from $here"
+
+Step "Preparing the downloaded files"
 Get-ChildItem $here -Recurse -File | Unblock-File   # the downloaded zip marks every file
+Done
 
-# stop what runs now (an update)
-Get-Process GnosisVPN -ErrorAction SilentlyContinue | Stop-Process -Force
-if (Get-Service GnosisVPN -ErrorAction SilentlyContinue) { Stop-Service GnosisVPN -Force -ErrorAction SilentlyContinue }
-foreach ($i in 1..30) { if (-not (Get-Process gvpndows -ErrorAction SilentlyContinue | Where-Object Path -eq "C:\GnosisVPN\gvpndows.exe")) { break }; Start-Sleep 1 }
-Get-Process gvpndows -ErrorAction SilentlyContinue | Where-Object Path -eq "C:\GnosisVPN\gvpndows.exe" | Stop-Process -Force
+# an update: stop what runs now (bounded, with a countdown)
+Stop-App
+Stop-GnosisService 30
 
-# the service: C:\GnosisVPN, changeable by SYSTEM and Administrators only (it runs as LocalSystem)
+Step "Installing the service in C:\GnosisVPN (changeable by administrators only)"
 New-Item -ItemType Directory -Force C:\GnosisVPN | Out-Null
 icacls C:\GnosisVPN /setowner "*S-1-5-32-544" /T /C /Q | Out-Null
 icacls C:\GnosisVPN /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX" /C /Q | Out-Null
@@ -29,27 +32,32 @@ if (-not (Get-Service GnosisVPN -ErrorAction SilentlyContinue)) {
 # starts with Windows (delayed, after the network), restarted if it ever crashes; connecting stays the app's job
 sc.exe config GnosisVPN start= delayed-auto | Out-Null
 sc.exe failure GnosisVPN reset= 86400 actions= restart/5000/restart/30000/restart/60000 | Out-Null
-Say "service installed: $((Get-FileHash C:\GnosisVPN\gvpndows.exe).Hash.Substring(0,16))"
+Done ("build " + (Get-FileHash C:\GnosisVPN\gvpndows.exe).Hash.Substring(0, 16))
 
-# the app: Program Files (admin-only writable), Start menu entry
+Step "Installing the app in $app, with a Start menu entry"
 if (Test-Path $app) { Remove-Item $app -Recurse -Force }
 Copy-Item (Join-Path $here "app") $app -Recurse
 $lnk = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\Gnosis VPN.lnk"
 $s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk); $s.TargetPath = Join-Path $app "GnosisVPN.exe"; $s.WorkingDirectory = $app; $s.Save()
-Say "app installed in $app"
+Done
 
+Step "Starting the service and waiting until it answers (at most 15 s)"
 Start-Service GnosisVPN
 $ok = $false
-foreach ($i in 1..15) {
+for ($i = 1; $i -le 15; $i++) {
   try {
     $c = New-Object System.IO.Pipes.NamedPipeClientStream(".", "gnosisvpn", [System.IO.Pipes.PipeAccessRights]"Read, WriteData, Synchronize", [System.IO.Pipes.PipeOptions]::None, [System.Security.Principal.TokenImpersonationLevel]::Anonymous, [System.IO.HandleInheritability]::None)
-    $c.Connect(2000); $w = New-Object System.IO.StreamWriter($c); $w.AutoFlush = $true; $r = New-Object System.IO.StreamReader($c)
+    $c.Connect(1000); $w = New-Object System.IO.StreamWriter($c); $w.AutoFlush = $true; $r = New-Object System.IO.StreamReader($c)
     $w.WriteLine('{"type":"x_state"}'); $null = $r.ReadLine(); $c.Dispose(); $ok = $true; break
-  } catch { Start-Sleep 1 }
+  } catch { Write-Host ("`r           waiting: {0,2} s" -f $i) -NoNewline; Start-Sleep 1 }
 }
-if (-not $ok) { throw "the service started but does not answer; log: C:\ProgramData\gvpndows\gvpndows.log" }
-Say "service running and answering"
+if (-not $ok) { Write-Host ""; throw "the service started but does not answer; its log: C:\ProgramData\gvpndows\gvpndows.log" }
+Done
 
-# start the app as the signed-in user, not elevated (Windows notifications need that)
-if (-not $NoLaunch) { Start-Process explorer.exe -ArgumentList ('"' + (Join-Path $app "GnosisVPN.exe") + '"') }
-Say "done"
+if (-not $NoLaunch) {
+  Step "Starting the app (as you, not as administrator: Windows notifications need that)"
+  Start-Process explorer.exe -ArgumentList ('"' + (Join-Path $app "GnosisVPN.exe") + '"')
+  Done
+}
+Write-Host ("`nGnosis VPN installed in {0:0} s." -f ((Get-Date) - $script:t0).TotalSeconds)
+Log "done"

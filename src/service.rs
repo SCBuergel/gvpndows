@@ -420,6 +420,21 @@ fn set_state(state: u32, accept: u32) {
     unsafe { SetServiceStatus(h, &st) };
 }
 
+/// STOP_PENDING with a growing checkpoint: tells Windows the stop is progressing (2 s per step).
+fn set_stop_pending(checkpoint: u32) {
+    let h = *HANDLE_.lock().unwrap() as SERVICE_STATUS_HANDLE;
+    let st = SERVICE_STATUS {
+        dwServiceType: SERVICE_WIN32_OWN_PROCESS,
+        dwCurrentState: SERVICE_STOP_PENDING,
+        dwControlsAccepted: 0,
+        dwWin32ExitCode: NO_ERROR,
+        dwServiceSpecificExitCode: 0,
+        dwCheckPoint: checkpoint,
+        dwWaitHint: 2_000,
+    };
+    unsafe { SetServiceStatus(h, &st) };
+}
+
 unsafe extern "system" fn ctrl(control: u32, _ev: u32, _data: *mut c_void, _ctx: *mut c_void) -> u32 {
     if control == SERVICE_CONTROL_STOP || control == SERVICE_CONTROL_SHUTDOWN {
         set_state(SERVICE_STOP_PENDING, 0);
@@ -440,9 +455,28 @@ unsafe extern "system" fn service_main(_argc: u32, _argv: *mut *mut u16) {
     start_all();
     set_state(SERVICE_RUNNING, SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN);
     let _ = rx.recv();
-    log::line("service: stopping");
-    gnosis::shutdown();
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    // Bounded stop: the tunnel teardown runs in a thread; Windows gets a progress checkpoint every
+    // second (so `sc stop` and uninstall show progress), and after 15 s the service stops anyway.
+    log::line("service: stopping: tearing down the tunnel and the core");
+    let t0 = std::time::Instant::now();
+    let (dtx, drx) = mpsc::channel();
+    std::thread::spawn(move || {
+        gnosis::shutdown();
+        let _ = dtx.send(());
+    });
+    let mut done = false;
+    for cp in 1..=15u32 {
+        set_stop_pending(cp);
+        if drx.recv_timeout(std::time::Duration::from_secs(1)).is_ok() {
+            done = true;
+            break;
+        }
+    }
+    if done {
+        log::line(format!("service: stopped cleanly in {:.1} s", t0.elapsed().as_secs_f64()));
+    } else {
+        log::line("service: the teardown did not finish within 15 s; stopping anyway");
+    }
     set_state(SERVICE_STOPPED, 0);
 }
 
