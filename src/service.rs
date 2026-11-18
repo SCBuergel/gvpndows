@@ -85,11 +85,12 @@ pub fn use_program_data() -> Result<(), String> {
 
 /// Creates the folder with its final security descriptor in one step (owner SYSTEM, SYSTEM and
 /// Administrators only), so there is no moment in which other users could put files into it.
+/// Creation is always attempted: if the folder exists by now, it is used only if it is still not a
+/// link and still owned by SYSTEM or Administrators (someone may have created it since the check
+/// above and kept a handle to it); otherwise the service fails closed.
 fn create_private_dir(dir: &Path) -> Result<(), String> {
+    use windows_sys::Win32::Foundation::ERROR_ALREADY_EXISTS;
     use windows_sys::Win32::Storage::FileSystem::CreateDirectoryW;
-    if dir.exists() {
-        return Ok(()); // existing and trusted (checked above)
-    }
     unsafe {
         let mut sd: PSECURITY_DESCRIPTOR = null_mut();
         if ConvertStringSecurityDescriptorToSecurityDescriptorW(wide(DIR_SDDL).as_ptr(), 1, &mut sd, null_mut()) == 0 {
@@ -99,9 +100,17 @@ fn create_private_dir(dir: &Path) -> Result<(), String> {
         let ok = CreateDirectoryW(wide(&dir.to_string_lossy()).as_ptr(), &sa) != 0;
         let err = std::io::Error::last_os_error();
         LocalFree(sd as _);
-        if !ok {
+        if ok {
+            return Ok(());
+        }
+        if err.raw_os_error() != Some(ERROR_ALREADY_EXISTS as i32) {
             return Err(format!("creating {}: {err}", dir.display()));
         }
+    }
+    let link = std::fs::symlink_metadata(dir).map(|m| is_reparse_point(&m)).unwrap_or(true);
+    let owner = owner_sid(dir);
+    if link || !owner.as_deref().is_some_and(crate::pure::owner_trusted) {
+        return Err(format!("{} appeared while the service was starting (owner {owner:?}, link {link}); not using it", dir.display()));
     }
     Ok(())
 }
