@@ -17,7 +17,7 @@ with urllib.request.urlopen(f"https://ntfy.sh/{topic}/json?poll=1&since={since}"
     for line in r:
         m = json.loads(line)
         msg = m.get("message", "")
-        if m.get("event") != "message" or not msg.startswith(TAG.decode() + " "):
+        if m.get("event") != "message" or not msg.startswith(TAG.decode() + " ") or m.get("title", "").startswith("gvpndows log"):
             continue
         blob = base64.b64decode(msg.split(" ", 1)[1])
         E, ct = blob[:32], blob[32:]

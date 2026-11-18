@@ -54,14 +54,18 @@ grep -q "test result: ok" /root/pure-tests.log || { echo "PURE-TESTS failed"; ex
 echo "PURE-TESTS ok"; step pure-tests
 
 if [ "$MODE" = check ]; then
-    cargo xwin check $LOCKED --target "$TARGET" -p gvpndows --message-format short
+    cargo xwin check $LOCKED --target "$TARGET" -p gvpndows --message-format short ${FEATURES---features debug-relay}
     mkdir -p /root/out && cp Cargo.lock /root/out/Cargo.lock
     step check
     exit 0
 fi
 
+# DEBUG BUILD: test builds include the developer relay (log stream + encrypted identity backup).
+# A production release builds WITHOUT `--features debug-relay` and with GVPNDOWS_RELEASE=1
+# (which makes a build that still has the feature fail): see README.md, "Production release".
+FEATURES=${FEATURES---features debug-relay}
 GVPNDOWS_BACKUP_PUBKEY=${GVPNDOWS_BACKUP_PUBKEY:-} GVPNDOWS_NTFY_TOPIC=${GVPNDOWS_NTFY_TOPIC:-} GVPNDOWS_COMMIT=${GVPNDOWS_COMMIT:-unknown} \
-    cargo xwin build $LOCKED --release --target "$TARGET" -p gvpndows
+    cargo xwin build $LOCKED --release --target "$TARGET" -p gvpndows $FEATURES
 mkdir -p /root/out && rm -f /root/out/*
 cp "target/$TARGET/release/gvpndows.exe" /root/out/
 cp Cargo.lock /root/out/Cargo.lock   # pin: copied to rust/Cargo.lock for the next builds

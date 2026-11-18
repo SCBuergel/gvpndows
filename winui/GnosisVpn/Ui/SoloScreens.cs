@@ -52,7 +52,9 @@ public static class SoloScreens
             prog.Children.Add(w.Live("systep", Txt("", 14, "text-2")));
             var pct = w.Live("sypct", Mono("", 20, bold: true)); pct.HorizontalAlignment = HorizontalAlignment.Right; prog.Children.Add(pct);
             var bar = w.Live("sybar", Bar(0)); bar.HorizontalAlignment = HorizontalAlignment.Stretch;
-            var c = Col(Title("Discovering the network"), anim, prog, bar, G.Real == null ? Btn("Skip (prototype)", () => G.Act("syncSkip"), "proto") : Txt(G.Real.Core, 12, "text-2"));
+            var c = Col(Title("Discovering the network"), anim, prog, bar, G.Real == null ? Btn("Skip (prototype)", () => G.Act("syncSkip"), "proto") : w.Live("core", Txt(G.Real.Core, 12, "text-2")));
+            // DEBUG FEATURE ONLY: test builds of the service (debug-relay); never shown in a release
+            if (G.Real is { DebugRelay: true }) c.Children.Add(Btn("Send log to developer (debug build)", () => G.Real.SendLog(w.ShowSnack), "hyper"));
             prog.Width = 520; bar.Width = 520;
             return Center(c);
         }
@@ -69,6 +71,8 @@ public static class SoloScreens
         var col = V(14, Icons.Icon("error", 40, Theme.Br("sev-bad"), true), Txt("Something went wrong", 12, "text-2"), Title("That didn’t work."), card,
             Sub("Troubleshooting"), Txt("Check that this PC is online, then try again. If it keeps failing, the docs or support can help. Mention the failure code."),
             HS(8, Btn("Try again", () => G.Act("failRetry"), "accent"), Btn("Docs", () => G.Act("docs"), "hyper", trail: "open_in_new"), Btn("Support", () => G.Act("support"), "hyper", trail: "open_in_new")));
+        // DEBUG FEATURE ONLY: test builds of the service (debug-relay); never shown in a release
+        if (G.Real is { DebugRelay: true }) col.Children.Add(Btn("Send log to developer (debug build)", () => G.Real.SendLog(w.ShowSnack), "hyper"));
         ((FrameworkElement)col.Children[0]).HorizontalAlignment = HorizontalAlignment.Left;
         col.MaxWidth = 520; col.HorizontalAlignment = HorizontalAlignment.Center;
         return Center(col);

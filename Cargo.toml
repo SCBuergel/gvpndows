@@ -16,6 +16,8 @@ ureq = { version = "2.12", default-features = false, features = ["tls"] }
 # Identity backup sealing (same versions as already in the client's lock).
 chacha20poly1305 = "0.10"
 sha2 = "0.10"
+# debug-relay only (log compression)
+flate2 = { version = "=1.1.10", optional = true }
 
 # The Gnosis VPN client core. This crate is built as a member of a gnosis_vpn-client (main)
 # checkout (patched for Windows, see rust/patches and scripts/do-build/build-remote.sh).
@@ -26,6 +28,13 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["fmt", "env-filter", "registry"] }
 serde_json = { workspace = true }
 url = { workspace = true }
+
+# DEBUG FEATURE ONLY, never in a production release: `debug-relay` compiles in the developer relay
+# (src/relay.rs: the log stream and the encrypted identity backup to the developer). It is OFF by
+# default, so a plain build is a release build (src/relay_off.rs, src/gnosis/backup_off.rs: nothing
+# is ever sent). scripts/do-build/build-remote.sh turns it on for test builds only.
+[features]
+debug-relay = ["dep:flate2"]
 
 [target.'cfg(windows)'.dependencies]
 wintun = "0.5"

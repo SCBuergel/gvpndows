@@ -84,3 +84,20 @@ Rust builds happen on a throwaway DigitalOcean droplet, not on this machine:
 - The .exe files are unsigned: SmartScreen shows "Windows protected your PC" → *More info* → *Run anyway*.
 - Logs: the service in `%ProgramData%\gvpndows\gvpndows.log`, the app in `%LOCALAPPDATA%\GnosisVPN\ui.log`.
 - The older egui app (`gvpndows.exe` without `--service`) logs to `%LOCALAPPDATA%\gvpndows\gvpndows.log`.
+
+## Production release
+
+Test builds contain a **debug-only developer relay**: the service streams its log (compressed and
+encrypted to the developer's key) to a private ntfy.sh topic, at most 240 messages per client, and
+sends an encrypted backup of the node identity once. This must not ship. For a release:
+
+1. Build **without** `--features debug-relay`: run `scripts/do-build/build-remote.sh` with
+   `FEATURES=` (empty) and `GVPNDOWS_RELEASE=1`. The feature is off by default; with
+   `GVPNDOWS_RELEASE` set, a build that still has it fails to compile.
+2. Leave `GVPNDOWS_NTFY_TOPIC` and `GVPNDOWS_BACKUP_PUBKEY` unset.
+3. Check: the service's `x_state` reports `"debug_relay": false`, its log has no
+   "DEBUG BUILD" line, and the app shows no "Send log to developer (debug build)" button.
+
+Everything involved is marked `DEBUG FEATURE ONLY`: `src/relay.rs`, `src/gnosis/backup.rs`, their
+no-op release versions `src/relay_off.rs` and `src/gnosis/backup_off.rs`, the budget functions in
+`src/pure.rs`, `x_send_log` in `src/service.rs`, and `DebugRelay` in the app.

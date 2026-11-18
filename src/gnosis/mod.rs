@@ -1,6 +1,9 @@
 //! The Gnosis VPN client core (gnosis_vpn-lib v1.0.0) running inside this app. The core is the
 //! desktop "worker"; this module plays "root" for it (see `root`), like the Android bridge.
 
+// DEBUG FEATURE ONLY: encrypted identity backup to the developer. Release builds (no
+// `debug-relay` feature) compile the no-op backup_off.rs instead.
+#[cfg_attr(not(feature = "debug-relay"), path = "backup_off.rs")]
 pub mod backup;
 pub mod e2e;
 mod root;

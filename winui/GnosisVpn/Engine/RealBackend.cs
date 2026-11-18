@@ -117,6 +117,10 @@ public sealed class RealBackend
     public string NodeAddress { get; private set; } = "";
     public string Core { get; private set; } = "connecting to the service";
     public bool ServiceUp => link.Connected;
+    /// <summary>DEBUG FEATURE ONLY: the service is a test build that streams its log to the
+    /// developer (Cargo feature debug-relay). Release builds report false and the app then shows no
+    /// "Send log to developer" button.</summary>
+    public bool DebugRelay { get; private set; }
     public string? LastError => link.LastError;
     /// <summary>MB per wxHOPR, from the exit's PIX chunk price once known (660 MB for 5.94 wxHOPR on prod).</summary>
     double mbPerWx = 660.160512 / 5.941444608;
@@ -164,6 +168,17 @@ public sealed class RealBackend
         });
     }
 
+    /// <summary>DEBUG FEATURE ONLY: asks a debug-build service to send its next log message now.</summary>
+    public void SendLog(Action<string> say)
+    {
+        _ = Task.Run(async () =>
+        {
+            var r = await cmdLink.Send(new { type = "x_send_log" }, 5000, retry: false);
+            var msg = r?["ok"] != null ? "Log sent to the developer." : "Could not send the log: " + (r?["error"]?.ToString() ?? cmdLink.LastError ?? "no answer");
+            ui(() => say(msg));
+        });
+    }
+
     /// <summary>For --selftest: feed a service reply as if it came from the pipe.</summary>
     public void ApplyForTest(JsonNode? st, JsonNode? bal) => Apply(st, bal);
 
@@ -179,6 +194,7 @@ public sealed class RealBackend
         }
         if (S.Fail?.Code == "SERVICE") S.Fail = null;
         Core = st["core"]?.ToString() ?? "";
+        DebugRelay = st["debug_relay"]?.GetValue<bool>() == true;
         var data = st["status"]?["data"];
         var mode = data?["run_mode"]?["type"]?.ToString();
         switch (mode)
@@ -232,6 +248,9 @@ public sealed class RealBackend
 
         // connection
         var kind = conn?["type"]?.ToString();
+        // From verify_ping on, the tunnel and its routes are up and carry traffic; the core is only
+        // checking the exit's ping and tuning the session. Show that as connected.
+        if (kind == "connecting" && conn?["phase"]?["type"]?.ToString() is "verify_ping" or "adjust_to_main" or "connection_established") kind = "connected";
         var since = Ms(conn?["since"]);
         if (pendingConnect != null && FakeEngine.Now - pendingAt > 8000) pendingConnect = null;
         switch (kind)

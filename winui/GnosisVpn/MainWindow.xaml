@@ -16,9 +16,10 @@
       </Grid>
     </NavigationView>
     <Grid x:Name="Solo" Grid.Row="1" Visibility="Collapsed" BorderThickness="0,1,0,0">
-      <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+      <!-- the startup screens shrink to fit a short window instead of scrolling -->
+      <Viewbox StretchDirection="DownOnly" Stretch="Uniform">
         <ContentPresenter x:Name="SoloHost" />
-      </ScrollViewer>
+      </Viewbox>
     </Grid>
     <Grid x:Name="Overlay" Grid.RowSpan="2" IsHitTestVisible="False">
       <Border x:Name="Snack" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="24,0,24,20" Padding="16,10" CornerRadius="6" BorderThickness="1" />

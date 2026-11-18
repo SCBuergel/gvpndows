@@ -4,6 +4,9 @@
 mod diag;
 mod log;
 mod pure;
+// DEBUG FEATURE ONLY: the developer relay. Release builds (no `debug-relay` feature) compile the
+// no-op src/relay_off.rs instead, so they contain no code that sends anything to the developer.
+#[cfg_attr(not(feature = "debug-relay"), path = "relay_off.rs")]
 mod relay;
 mod sysinfo;
 mod tunnel;

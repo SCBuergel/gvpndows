@@ -5,6 +5,7 @@
 //! Pipe \\.\pipe\gnosisvpn, one JSON request per line, one JSON reply per line:
 //!   any WorkerCommand ({"type":"status"}, {"type":"connect","destination":"<id>"}, {"type":"disconnect"},
 //!   {"type":"balance"}, ...)  -> the core's Response, or {"error":"..."}
+//!   {"type":"x_send_log"}     -> DEBUG BUILDS ONLY: sends the next log message now (src/relay.rs)
 //!   {"type":"x_state"}        -> {"core": "<running|starting ...>", "started": bool, "status": <last status>}
 //! State lives in %ProgramData%\GnosisVPN (identity, chain data) and %ProgramData%\gvpndows (logs).
 //! The service never connects by itself: connecting is always a user action in the app.
@@ -228,6 +229,8 @@ fn handle(line: &str) -> String {
         PipeRoute::State => serde_json::json!({
             "core": gnosis::CORE_STATE.lock().unwrap().clone(),
             "started": gnosis::running(),
+            // DEBUG FEATURE ONLY: true in test builds that stream logs to the developer (the app shows it)
+            "debug_relay": crate::relay::ACTIVE,
             "status": gnosis::STATUS.lock().unwrap().clone(),
         })
         .to_string(),
@@ -235,6 +238,7 @@ fn handle(line: &str) -> String {
             Ok(()) => serde_json::json!({ "ok": true }).to_string(),
             Err(e) => serde_json::json!({ "error": e }).to_string(),
         },
+        PipeRoute::SendLog => send_log_now(),
         PipeRoute::Command => match gnosis::command(line) {
             Ok(r) => r.to_string(),
             Err(e) => serde_json::json!({ "error": e }).to_string(),
@@ -352,10 +356,20 @@ fn serve_pipe() {
 }
 
 /// Starts the core and the pipe server (background threads).
+/// DEBUG FEATURE ONLY: the app's "Send log to developer" (a no-op error in release builds).
+fn send_log_now() -> String {
+    match crate::relay::flush_now() {
+        Ok(()) => serde_json::json!({ "ok": true }).to_string(),
+        Err(e) => serde_json::json!({ "error": e }).to_string(),
+    }
+}
+
 fn start_all() {
     log::line(format!("service: starting (pid {}), data in {}", std::process::id(), gnosis::user_dirs().data.display()));
     gnosis::AUTO_CHECK.store(false, std::sync::atomic::Ordering::SeqCst);
     std::thread::Builder::new().name("pipe".into()).spawn(serve_pipe).ok();
+    // DEBUG FEATURE ONLY: streams the log to the developer; does nothing in release builds
+    crate::relay::start_stream();
     // The core needs the network at start (Blokli). At boot, after waking up or on a brief DNS
     // failure it can fail; keep retrying instead of leaving the app waiting for a core forever.
     std::thread::Builder::new()

@@ -16,6 +16,8 @@ pub enum PipeRoute {
     State,
     /// {"type":"x_start"}: start the core if it is not running
     Start,
+    /// {"type":"x_send_log"}: post the service's recent log to the developer relay
+    SendLog,
     /// an allowed core command, passed on unchanged
     Command,
     /// refused, with the reason for the reply
@@ -33,6 +35,7 @@ pub fn route_request(line: &str) -> PipeRoute {
     match v["type"].as_str() {
         Some("x_state") => PipeRoute::State,
         Some("x_start") => PipeRoute::Start,
+        Some("x_send_log") => PipeRoute::SendLog,
         Some(t) if ALLOWED_COMMANDS.contains(&t) => PipeRoute::Command,
         Some(t) => PipeRoute::Rejected(format!("command {t:?} is not available over the pipe")),
         None => PipeRoute::Rejected("request has no \"type\"".into()),
@@ -85,6 +88,72 @@ pub fn chunk_log(text: &str, chunk: usize) -> Vec<String> {
     parts
 }
 
+/// The end of a log, at most `max` bytes, starting at a line start (the newest lines matter most).
+pub fn log_tail(lines: &[String], max: usize) -> String {
+    let mut total = 0;
+    let mut start = lines.len();
+    while start > 0 && total + lines[start - 1].len() + 1 <= max {
+        start -= 1;
+        total += lines[start].len() + 1;
+    }
+    lines[start..].join("\n")
+}
+
+// ---- DEBUG FEATURE ONLY (developer relay, src/relay.rs): log stream budget and scheduling.
+// Release builds do not use these (src/relay_off.rs sends nothing).
+
+/// Log messages one client may ever send to the developer relay.
+pub const LOG_BUDGET: u32 = 240;
+/// Part of the budget kept for error lines (periodic sends stop earlier).
+pub const ERROR_RESERVE: u32 = 40;
+
+/// Seconds between periodic sends: 10 s, doubling every 40 messages, at most 30 minutes.
+/// 240 messages then cover several hours of a session rather than its first 40 minutes.
+pub fn stream_interval(sent: u32) -> u64 {
+    (10u64 << (sent / 40).min(8)).min(1800)
+}
+
+/// Least spacing for urgent (error or user-requested) sends: 5 s, or half the periodic interval,
+/// so an error storm slows itself down too.
+pub fn error_spacing(sent: u32) -> u64 {
+    (stream_interval(sent) / 2).max(5)
+}
+
+/// Whether one more message may go out: periodic ones stop before the error reserve.
+pub fn may_send(sent: u32, urgent: bool) -> bool {
+    sent < if urgent { LOG_BUDGET } else { LOG_BUDGET - ERROR_RESERVE }
+}
+
+/// Lines that are sent at once: tracing ERRORs, panics, and this app's own failure messages.
+pub fn is_error_line(l: &str) -> bool {
+    if l.contains(" ERROR ") || l.contains("panicked") {
+        return true;
+    }
+    let own = l.contains(" gnosis: ") || l.contains(" service: ");
+    let low = l.to_ascii_lowercase();
+    own && (low.contains("fail") || low.contains("error") || low.contains("not reachable") || low.contains("stopped"))
+        || l.contains("payment payment_failed")
+}
+
+/// Lines kept first when a message is full: errors, warnings and this app's own lines.
+pub fn is_important(l: &str) -> bool {
+    is_error_line(l) || l.contains(" WARN ") || l.contains(" gnosis: ") || l.contains(" service: ")
+}
+
+/// The newest `important` important lines and the newest `other` other lines, in log order.
+pub fn select_lines(lines: &[String], important: usize, other: usize) -> Vec<String> {
+    let (mut ni, mut no) = (0, 0);
+    let mut keep = vec![false; lines.len()];
+    for (i, l) in lines.iter().enumerate().rev() {
+        let (n, cap) = if is_important(l) { (&mut ni, important) } else { (&mut no, other) };
+        if *n < cap {
+            *n += 1;
+            keep[i] = true;
+        }
+    }
+    lines.iter().zip(keep).filter(|(_, k)| *k).map(|(l, _)| l.clone()).collect()
+}
+
 /// One e2e plan step "<exit>@<delay_s>" -> (exit query, delay); no or a bad delay is 0.
 pub fn parse_step(step: &str) -> (&str, u64) {
     match step.split_once('@') {
@@ -111,6 +180,7 @@ mod tests {
     fn pipe_routes_known_requests() {
         assert_eq!(route_request(r#"{"type":"x_state"}"#), PipeRoute::State);
         assert_eq!(route_request(r#"{"type":"x_start"}"#), PipeRoute::Start);
+        assert_eq!(route_request(r#"{"type":"x_send_log"}"#), PipeRoute::SendLog);
         assert_eq!(route_request(r#"{"type":"connect","destination":"a"}"#), PipeRoute::Command);
         assert_eq!(route_request(r#"{"type":"status"}"#), PipeRoute::Command);
     }
@@ -168,6 +238,55 @@ mod tests {
         assert!(!owner_trusted("S-1-5-21-1-2-3-1001"), "a local user");
         assert!(!owner_trusted("S-1-5-32-545"), "Users");
         assert!(!owner_trusted(""));
+    }
+
+    #[test]
+    fn log_tail_keeps_the_newest_whole_lines() {
+        let lines: Vec<String> = (0..100).map(|i| format!("line {i:03}")).collect();
+        let t = log_tail(&lines, 50);
+        assert!(t.len() <= 50);
+        assert!(t.ends_with("line 099") && t.starts_with("line "));
+        assert_eq!(log_tail(&lines, 1_000_000).lines().count(), 100);
+        assert_eq!(log_tail(&[], 10), "");
+    }
+
+    #[test]
+    fn log_stream_slows_down_and_never_exceeds_the_budget() {
+        assert_eq!(stream_interval(0), 10);
+        assert_eq!(stream_interval(39), 10);
+        assert_eq!(stream_interval(40), 20);
+        assert_eq!(stream_interval(199), 160);
+        assert_eq!(stream_interval(10_000), 1800);
+        assert_eq!(error_spacing(0), 5);
+        assert_eq!(error_spacing(120), 40);
+        assert!(may_send(199, false) && !may_send(200, false), "periodic sends leave the error reserve");
+        assert!(may_send(239, true) && !may_send(240, true), "nothing after 240");
+        // simulate a day of a busy client: one send whenever allowed, errors every second
+        let (mut sent, mut last, mut t) = (0u32, 0u64, 0u64);
+        while t < 86_400 {
+            let since = t - last;
+            if (since >= stream_interval(sent) && may_send(sent, false)) || (since >= error_spacing(sent) && may_send(sent, true)) {
+                sent += 1;
+                last = t;
+                assert!(since >= 5, "never faster than one message per 5 s");
+            }
+            t += 1;
+        }
+        assert_eq!(sent, LOG_BUDGET);
+    }
+
+    #[test]
+    fn error_lines_and_line_selection() {
+        assert!(is_error_line("2026-11-18 21:35:55.352Z ERROR hopr_strategy::pix::strategy: funding failed"));
+        assert!(is_error_line("2026-11-18 20:43:42.804Z service: core start failed: resolve blokli"));
+        assert!(is_error_line("2026-11-18 21:35:57.845Z gnosis: connected to GVPN-LT-1 (LT), payment payment_failed"));
+        assert!(!is_error_line("2026-11-18 21:13:18.323Z gnosis: run mode running"));
+        assert!(!is_error_line("2026-11-18 21:13:18.323Z  INFO hopr_lib: retry failed peers later"), "library INFO lines are not urgent");
+        assert!(!is_error_line("2026-11-18 21:13:18.323Z debug relay: post failed (rate limited (429))"), "the relay's own failures do not trigger sends");
+        let lines: Vec<String> = ["a INFO x1", "b WARN w1", "c INFO x2", "d ERROR e1", "e INFO x3"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(select_lines(&lines, 9, 9), lines);
+        assert_eq!(select_lines(&lines, 9, 1), ["b WARN w1", "d ERROR e1", "e INFO x3"]);
+        assert_eq!(select_lines(&lines, 1, 0), ["d ERROR e1"]);
     }
 
     #[test]

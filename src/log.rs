@@ -15,6 +15,8 @@ struct Log {
 }
 
 static LOG: OnceLock<Log> = OnceLock::new();
+/// Lines ever logged in this process (the in-memory buffer keeps the newest MAX_LINES).
+static TOTAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 pub fn dir() -> PathBuf {
     let base = std::env::var_os("LOCALAPPDATA")
@@ -52,11 +54,22 @@ pub fn line(msg: impl AsRef<str>) {
     }
     if let Ok(mut l) = log.lines.lock() {
         l.push(text);
+        TOTAL.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let n = l.len();
         if n > MAX_LINES {
             l.drain(..n - MAX_LINES);
         }
     }
+}
+
+/// Lines logged after line number `cursor`: (lines, new cursor, lines already dropped from the buffer).
+pub fn since(cursor: u64) -> (Vec<String>, u64, u64) {
+    let Some(log) = LOG.get() else { return (Vec::new(), cursor, 0) };
+    let Ok(l) = log.lines.lock() else { return (Vec::new(), cursor, 0) };
+    let total = TOTAL.load(std::sync::atomic::Ordering::SeqCst);
+    let new = (total - cursor.min(total)) as usize;
+    let take = new.min(l.len());
+    (l[l.len() - take..].to_vec(), total, (new - take) as u64)
 }
 
 pub fn snapshot() -> Vec<String> {

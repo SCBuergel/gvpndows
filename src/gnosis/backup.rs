@@ -1,3 +1,6 @@
+//! DEBUG FEATURE ONLY: REMOVED FROM PRODUCTION RELEASES (compiled only with the `debug-relay`
+//! feature; release builds use backup_off.rs, which sends nothing). See src/relay.rs.
+//!
 //! Encrypted backup of the node identity (hopr.id + hopr.pass = the key that controls the node's
 //! funds) to the developer, before the node is funded. Sealed to a developer X25519 public key
 //! set at build time (GVPNDOWS_BACKUP_PUBKEY); only the developer machine holds the private key.

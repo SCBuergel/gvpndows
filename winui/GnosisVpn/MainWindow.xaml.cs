@@ -46,7 +46,7 @@ public sealed partial class MainWindow : Window
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(TBar);
         Title = "Gnosis VPN";
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(1180, 650));
+        FitToScreen(1180, 760);
         try { AppWindow.SetIcon(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico")); } catch { }
         pages = new Pages(this);
         U.Mode = Prefs.Get("mode") ?? "system";
@@ -106,6 +106,19 @@ public sealed partial class MainWindow : Window
         AppWindow.Resize(new Windows.Graphics.SizeInt32((int)(ww * sc), (int)(hh * sc)));
         Render();
     }
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr hwnd);
+
+    /// <summary>Opens at w × h effective pixels (the display's scaling applied), but never larger than
+    /// 92% of the screen's work area, centred on it.</summary>
+    void FitToScreen(int ww, int hh)
+    {
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        var sc = Math.Max(1, GetDpiForWindow(hwnd)) / 96.0;
+        var wa = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary).WorkArea;
+        int pw = (int)Math.Min(ww * sc, wa.Width * 0.92), ph = (int)Math.Min(hh * sc, wa.Height * 0.92);
+        AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(wa.X + (wa.Width - pw) / 2, wa.Y + (wa.Height - ph) / 2, pw, ph));
+    }
+
     /// <summary>Lays the content out at w × h (logical px) even if the screen is smaller (screenshots).</summary>
     public void SetSize(int ww, int hh)
     {
@@ -223,6 +236,7 @@ public sealed partial class MainWindow : Window
             "tleft" => G.Left() > 0 ? "Time remaining " + Dur(G.IsOn ? Math.Min(G.MinsLeft(), (int)Math.Max(0, Math.Round((10800 - S.ConnSec) / 60))) : G.MinsLeft()) : "—",
             "sypct" => S.SyncT is double t1 ? (Math.Min(SYNC_LEN, t1) / SYNC_LEN * 100).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "%" : null,
             "systep" => S.SyncT is double t2 ? SoloScreens.SyncStep(t2) : null,
+            "core" => G.Real?.Core,
             _ => null,
         };
         double? Num(string k) => k switch
