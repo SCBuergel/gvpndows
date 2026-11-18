@@ -19,4 +19,9 @@ Expand-Archive -Force C:\gv\winui.zip C:\gv\src
 C:\dotnet\dotnet.exe publish C:\gv\src\winui\GnosisVpn\GnosisVpn.csproj -c $CFG -r win-x64 -p:Platform=x64 -o C:\gv\app -v:minimal 2>&1 | Out-File C:\gv\build.log
 'BUILD-EXIT ' + \$LASTEXITCODE + ' in ' + [int]((Get-Date) - \$t).TotalSeconds + ' s'
 Get-Content C:\gv\build.log | Select-String -Pattern 'error|warning CS|-> ' | Select-Object -First 60 | ForEach-Object { \$_.Line.Trim() }
+if (Test-Path C:\gv\app\GnosisVPN.exe) {
+  Remove-Item C:\gv\selftest.txt -ErrorAction SilentlyContinue
+  \$p = Start-Process C:\gv\app\GnosisVPN.exe -ArgumentList '--selftest','C:\gv\selftest.txt' -PassThru -Wait
+  'SELFTEST-EXIT ' + \$p.ExitCode; Get-Content C:\gv\selftest.txt -ErrorAction SilentlyContinue
+} else { 'SELFTEST-EXIT missing GnosisVPN.exe' }
 "

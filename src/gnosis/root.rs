@@ -36,7 +36,7 @@ pub struct TunCounters {
     pub down_bytes: AtomicU64,
     pub dropped: AtomicU64,
     /// Packets from this process's own UDP sockets (the HOPR node) that Windows routed into the
-    /// tunnel; dropped, and their destination gets a bypass route (see `leak_check`).
+    /// tunnel; dropped (see `leak_check`).
     pub leaked: AtomicU64,
 }
 pub static TUN: TunCounters = TunCounters {
@@ -51,13 +51,6 @@ pub static TUN: TunCounters = TunCounters {
 
 /// Local UDP ports owned by this process (the HOPR node's sockets), refreshed every 5 s.
 static OWN_UDP_PORTS: Mutex<Vec<u16>> = Mutex::new(Vec::new());
-/// Destinations of leaked HOPR packets, for the bypass worker in `gnosis::mod`.
-static LEAK_TX: Mutex<Option<SyncSender<Ipv4Addr>>> = Mutex::new(None);
-
-pub fn set_leak_sender(tx: SyncSender<Ipv4Addr>) {
-    *LEAK_TX.lock().unwrap() = Some(tx);
-}
-
 fn own_udp_ports() -> Vec<u16> {
     use windows_sys::Win32::NetworkManagement::IpHelper::{GetExtendedUdpTable, MIB_UDPROW_OWNER_PID, UDP_TABLE_OWNER_PID};
     let pid = std::process::id();
@@ -83,23 +76,15 @@ fn port_refresher() {
     }
 }
 
-/// True if this packet is the HOPR node's own UDP traffic (it must never enter the tunnel it
-/// carries); reports its destination for a bypass route.
+/// True if this packet is the HOPR node's own UDP traffic, which must never enter the tunnel it
+/// carries: it is dropped. No route is added for its destination: announced addresses are chosen
+/// by third parties, and a route would send every app's traffic to that address outside the VPN.
+/// (The process-scoped fix is to bind HOPR's sockets to the WAN address.)
 fn leak_check(p: &[u8]) -> bool {
-    if p.len() < 28 || p[0] >> 4 != 4 || p[9] != 17 {
-        return false;
-    }
-    let ihl = ((p[0] & 15) as usize) * 4;
-    if p.len() < ihl + 4 {
-        return false;
-    }
-    let sport = u16::from_be_bytes([p[ihl], p[ihl + 1]]);
-    if !OWN_UDP_PORTS.lock().map(|v| v.contains(&sport)).unwrap_or(false) {
-        return false;
-    }
-    TUN.leaked.fetch_add(1, Relaxed);
-    if let Some(tx) = LEAK_TX.lock().unwrap().as_ref() {
-        let _ = tx.try_send(Ipv4Addr::new(p[16], p[17], p[18], p[19]));
+    let Some(dst) = OWN_UDP_PORTS.lock().ok().and_then(|ports| crate::pure::hopr_leak_dst(p, &ports)) else { return false };
+    let n = TUN.leaked.fetch_add(1, Relaxed) + 1;
+    if n.is_power_of_two() {
+        log::line(format!("tunnel: {n} HOPR packets dropped that Windows routed into the tunnel (latest to {dst})"));
     }
     true
 }
@@ -303,18 +288,6 @@ impl Root {
             t0.elapsed().as_millis()
         ));
         Ok(ADAPTER_NAME.to_string())
-    }
-
-    /// A HOPR peer outside the core's peer list was reached through the tunnel: route it around.
-    pub fn bypass_leak(&mut self, ip: Ipv4Addr) -> bool {
-        if self.bypass_peers.contains(&ip) || self.tunnel_routes.is_empty() {
-            return false;
-        }
-        let Some(tun_luid) = self.adapter.as_ref().map(|a| a.luid) else { return false };
-        let Ok(wan) = self.wan(tun_luid) else { return false };
-        self.add_bypass(IpAddr::V4(ip), 32, wan);
-        self.bypass_peers.insert(ip);
-        true
     }
 
     pub fn update_peer_ips(&mut self, peer_ips: &[Ipv4Addr]) {

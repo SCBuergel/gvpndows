@@ -16,7 +16,7 @@ export AWS_LC_SYS_PREBUILT_NASM=1
 
 # --- workspace: pristine client + patch + our crate ---
 cd /root/client
-CLIENT_REF=${CLIENT_REF:-00641e581cbf}
+CLIENT_REF=${CLIENT_REF:-00641e581cbf15da1378b72acec4b9f1f357b018}
 git cat-file -e "$CLIENT_REF^{commit}" 2>/dev/null || git fetch -q origin main
 git checkout -q -f "$CLIENT_REF" && git clean -qfdx -e target && echo "client $(git log --oneline -1)"
 for p in /root/src/rust/patches/*.patch; do git apply "$p"; echo "applied $(basename "$p")"; done
@@ -47,6 +47,11 @@ mkdir -p /root/cache
 echo "$WINTUN_SHA256  /root/cache/$WINTUN_ZIP" | sha256sum -c --quiet || { echo "wintun zip hash mismatch"; exit 1; }
 mkdir -p gnosis_vpn-windows/vendor && unzip -qo /root/cache/$WINTUN_ZIP -d gnosis_vpn-windows/vendor
 step workspace
+
+# Unit tests of the platform-independent logic (src/pure.rs), on the Linux host: fast, no client workspace.
+(cd /root/src/rust/pure-tests && cargo test -q 2>&1 | tail -4) | tee /root/pure-tests.log
+grep -q "test result: ok" /root/pure-tests.log || { echo "PURE-TESTS failed"; exit 1; }
+echo "PURE-TESTS ok"; step pure-tests
 
 if [ "$MODE" = check ]; then
     cargo xwin check $LOCKED --target "$TARGET" -p gvpndows --message-format short

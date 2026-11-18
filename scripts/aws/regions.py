@@ -8,6 +8,7 @@ for r in ["us-east-1","us-east-2","us-west-2","eu-west-1","eu-west-2","eu-centra
     except botocore.exceptions.ClientError as e:
         print(r, e.response["Error"]["Code"], "SCP" if "service control policy" in str(e) else str(e)[:150])
 s = session("us-east-1"); iam = s.client("iam")
-for fn, kw in [("list_attached_user_policies", {"UserName":"perf-test"}), ("list_user_policies", {"UserName":"perf-test"}), ("list_groups_for_user", {"UserName":"perf-test"})]:
+user = s.client("sts").get_caller_identity()["Arn"].rsplit("/", 1)[-1]
+for fn, kw in [("list_attached_user_policies", {"UserName": user}), ("list_user_policies", {"UserName": user}), ("list_groups_for_user", {"UserName": user})]:
     try: print(fn, getattr(iam, fn)(**kw))
     except botocore.exceptions.ClientError as e: print(fn, e.response["Error"]["Code"])

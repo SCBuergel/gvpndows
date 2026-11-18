@@ -199,7 +199,7 @@ fn conn_is(d: &Value, kind: &str, id: Option<&str>) -> bool {
 }
 
 fn step(plan: &str, heavy_mb: u64, heavy_s: u64) -> Result<Value, String> {
-    let (q, delay) = plan.split_once('@').map(|(a, b)| (a, b.parse::<u64>().unwrap_or(0))).unwrap_or((plan, 0));
+    let (q, delay) = crate::pure::parse_step(plan);
     let (d, _) = wait(&format!("an exit matching {q:?}"), Duration::from_secs(180), |d| resolve(d, q).is_some())?;
     let (id, name) = resolve(&d, q).ok_or_else(|| format!("no exit matches {q:?}"))?;
     let cur = d["connection"]["destination"].as_str().map(str::to_string);

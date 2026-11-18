@@ -9,3 +9,6 @@ hopr.pass
 /Cargo.lock
 /winui/*/bin
 /winui/*/obj
+__pycache__/
+/rust/pure-tests/target
+/rust/pure-tests/Cargo.lock

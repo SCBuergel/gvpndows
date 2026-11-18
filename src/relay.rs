@@ -34,18 +34,7 @@ pub fn send_key(public_key: String) {
 pub fn send_log() {
     std::thread::spawn(|| {
         let text = crate::log::snapshot().join("\n");
-        let mut parts: Vec<String> = Vec::new();
-        let mut cur = String::new();
-        for line in text.lines() {
-            if cur.len() + line.len() + 1 > CHUNK && !cur.is_empty() {
-                parts.push(std::mem::take(&mut cur));
-            }
-            cur.extend(line.chars().take(CHUNK));
-            cur.push('\n');
-        }
-        if !cur.is_empty() {
-            parts.push(cur);
-        }
+        let parts = crate::pure::chunk_log(&text, CHUNK);
         // A stalled tunnel also stalls DNS and HTTPS, so failed parts are retried every 30 s for
         // up to 15 minutes (e.g. until the user disconnects); sent parts are not sent again.
         let n = parts.len();

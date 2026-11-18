@@ -9,8 +9,13 @@ Usage: python3 -I winui/tools/gen_assets.py [PROTOTYPE_DIR]
 """
 import base64, json, os, re, sys
 
-PROTO = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser("~/mobile-UI")
-APP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "GnosisVpn")
+CHECK = "--check" in sys.argv
+args = [a for a in sys.argv[1:] if a != "--check"]
+PROTO = args[0] if args else os.path.expanduser("~/mobile-UI")
+REAL_APP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "GnosisVpn")
+# --check: generate into a temporary folder and compare with the committed files
+import tempfile, filecmp
+APP = tempfile.mkdtemp(prefix="gvassets-") if CHECK else REAL_APP
 ASSETS, UI = os.path.join(APP, "Assets"), os.path.join(APP, "Ui")
 os.makedirs(os.path.join(ASSETS, "flags"), exist_ok=True); os.makedirs(UI, exist_ok=True)
 
@@ -98,3 +103,11 @@ qr = read("assets", "qr.svg")
 if "xmlns=" not in qr[:200]: qr = qr.replace("<svg ", '<svg xmlns="http://www.w3.org/2000/svg" ', 1)
 write(os.path.join(ASSETS, "qr.svg"), qr)
 print(f"tokens {len(tokens['light'])}+{len(tokens['dark'])}, icons {len(icons)}, flags {len(img['FLAGS'])}")
+if CHECK:
+    diff = []
+    for root, _, files in os.walk(APP):
+        for f in files:
+            gen = os.path.join(root, f); rel = os.path.relpath(gen, APP); com = os.path.join(REAL_APP, rel)
+            if not os.path.exists(com) or not filecmp.cmp(gen, com, shallow=False): diff.append(rel)
+    print("generated files match the committed ones" if not diff else "out of date: " + ", ".join(sorted(diff)))
+    sys.exit(1 if diff else 0)

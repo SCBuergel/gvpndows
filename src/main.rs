@@ -3,6 +3,7 @@
 
 mod diag;
 mod log;
+mod pure;
 mod relay;
 mod sysinfo;
 mod tunnel;
@@ -24,7 +25,11 @@ fn main() {
     let svc = std::env::args().any(|a| a == "--service" || a == "--serve");
     #[cfg(windows)]
     if svc {
-        service::use_program_data();
+        if let Err(e) = service::use_program_data() {
+            // fail closed: without private folders the node key would be readable by other users
+            eprintln!("gvpndows: cannot secure the service folders: {e}");
+            std::process::exit(3);
+        }
     }
     let log_file = log::init();
     std::panic::set_hook(Box::new(|info| {

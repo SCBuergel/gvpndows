@@ -10,7 +10,7 @@ use crate::log;
 use gnosis_vpn_lib::command::WorkerCommand;
 use gnosis_vpn_lib::core::Core;
 use gnosis_vpn_lib::event::{CoreToWorker, RequestToRoot, ResponseFromRoot, WorkerToCore};
-use gnosis_vpn_lib::worker_params::{AllowFlags, ConfigFileMode, WorkerParams};
+use gnosis_vpn_lib::worker_params::{AllowFlags, ConfigFileMode, SpawnParams};
 use gnosis_vpn_ipc::dirs::UserDirs;
 use std::net::{IpAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -148,25 +148,21 @@ fn prepare_and_spawn() -> Result<(), String> {
         .ok_or_else(|| format!("{host} has no IPv4 address"))?;
     let dirs = user_dirs();
     log::line(format!("gnosis: data in {}", dirs.data.display()));
-    let params = WorkerParams::new(ConfigFileMode::Generated, AllowFlags::default(), blokli_url, blokli_ip, dirs, NETWORK.to_string());
-    params.ensure_dirs().map_err(|e| format!("state dirs: {e}"))?;
+    // client main: the network name comes from Blokli (query_network retries until Blokli answers)
+    let spawn = SpawnParams::new(ConfigFileMode::Generated, AllowFlags::default(), blokli_url, None, dirs);
     *ROOT.lock().unwrap() = Some(root::Root::new(blokli_ip));
-    let (leak_tx, leak_rx) = std::sync::mpsc::sync_channel::<std::net::Ipv4Addr>(1024);
-    root::set_leak_sender(leak_tx);
-    std::thread::Builder::new()
-        .name("hopr-bypass".into())
-        .spawn(move || {
-            while let Ok(ip) = leak_rx.recv() {
-                if with_root(|r| r.bypass_leak(ip)) == Some(true) {
-                    log::line(format!("bypass: HOPR traffic to {ip} was entering the tunnel (not in the core's peer list); routed around it"));
-                }
-            }
-        })
-        .map_err(|e| e.to_string())?;
 
     let (sender, mut from_core) = mpsc::channel(32);
     set_state(format!("starting (Blokli {blokli_ip}, network {NETWORK})"));
     runtime().spawn(async move {
+        let params = spawn
+            .query_network(Duration::from_secs(15), Duration::from_secs(3), |kind, msg| log::line(format!("gnosis: Blokli not ready ({kind:?}): {msg}")))
+            .await;
+        if let Err(e) = params.ensure_dirs() {
+            set_state(format!("init failed: state dirs: {e}"));
+            STARTED.store(false, Ordering::SeqCst);
+            return;
+        }
         match Core::init(config, params, None, sender).await {
             Ok((core, to_core)) => {
                 *TO_CORE.lock().unwrap() = Some(to_core);
@@ -209,7 +205,9 @@ fn handle_request(req: RequestToRoot) {
             log::line(format!("gnosis: kill switch requested ({} peer IPs) - not enforced yet on Windows", peer_ips.len()));
             respond(ResponseFromRoot::KillswitchLockdown { request_id, res: Ok(()) });
         }
-        RequestToRoot::SetupTunnel { request_id, interface_address, mtu, dns, peer_ips } => {
+        RequestToRoot::SetupTunnel { request_id, interface_address, mtu, dns, peer_ips, blokli_ip } => {
+            // the address the worker really uses for Blokli (it may differ from our start-up lookup)
+            with_root(|r| r.blokli_ip = Some(blokli_ip));
             // Blocking Win32 calls: off the runtime threads.
             std::thread::spawn(move || {
                 let res = with_root(|r| r.setup_tunnel(&interface_address, mtu, dns.as_deref(), &peer_ips))

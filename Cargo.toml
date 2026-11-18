@@ -7,7 +7,7 @@ publish = false
 
 [dependencies]
 eframe = { version = "=0.31.1", default-features = false, features = ["glow", "default_fonts"] }
-# Same WireGuard implementation and tag as gnosis_vpn-client v1.0.0 (noise only, no device feature).
+# Same WireGuard implementation and tag as gnosis_vpn-client (noise only, no device feature).
 neptun = { git = "https://github.com/NordSecurity/neptun.git", tag = "v3.0.6", default-features = false }
 base64 = "0.22"
 getrandom = "0.2"
@@ -17,7 +17,7 @@ ureq = { version = "2.12", default-features = false, features = ["tls"] }
 chacha20poly1305 = "0.10"
 sha2 = "0.10"
 
-# The Gnosis VPN client core. This crate is built as a member of a gnosis_vpn-client v1.0.0
+# The Gnosis VPN client core. This crate is built as a member of a gnosis_vpn-client (main)
 # checkout (patched for Windows, see rust/patches and scripts/do-build/build-remote.sh).
 gnosis_vpn-lib = { path = "../gnosis_vpn-lib" }
 gnosis_vpn-ipc = { path = "../gnosis_vpn-ipc" }

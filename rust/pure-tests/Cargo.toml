@@ -1,0 +1,15 @@
+# Unit tests for src/pure.rs (platform-independent logic of the Windows app), runnable on Linux in
+# seconds without the client workspace: cd rust/pure-tests && cargo test
+[package]
+name = "gvpndows-pure-tests"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "../../src/pure.rs"
+
+[dependencies]
+serde_json = "1"
+
+[workspace]

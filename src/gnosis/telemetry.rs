@@ -89,6 +89,7 @@ fn run() {
     let mut last = (0u64, 0u64, Instant::now());
     let mut last_kind = String::new();
     let mut last_nerd = Instant::now();
+    let mut rows = 0u64;
     loop {
         let tick = Instant::now();
         if !super::running() {
@@ -168,6 +169,11 @@ fn run() {
             TUN.leaked.load(Relaxed).to_string(),
         ];
         let _ = writeln!(f, "{}", row.join(","));
+        rows += 1;
+        // a long connection: restart the file once it passes the limit (checked every 10 min)
+        if rows % 600 == 0 && f.metadata().map(|m| m.len() > MAX_FILE).unwrap_or(false) {
+            file = None;
+        }
         if let Some(rest) = Duration::from_secs(1).checked_sub(tick.elapsed()) {
             std::thread::sleep(rest);
         }

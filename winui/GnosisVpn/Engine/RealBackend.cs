@@ -36,6 +36,7 @@ public sealed class ServiceLink
                         pipe?.Dispose();
                         pipe = new NamedPipeClientStream(".", "gnosisvpn", PipeDirection.InOut, PipeOptions.Asynchronous);
                         await pipe.ConnectAsync(1500);
+                        ServiceCheck.Verify(pipe);
                         rd = new StreamReader(pipe, new UTF8Encoding(false)); wr = new StreamWriter(pipe, new UTF8Encoding(false)) { AutoFlush = true, NewLine = "\n" };
                     }
                     await wr!.WriteLineAsync(JsonSerializer.Serialize(cmd));
@@ -50,6 +51,51 @@ public sealed class ServiceLink
         }
         catch (Exception e) { LastError = e.Message; App.Log($"service: {JsonSerializer.Serialize(cmd)} failed after {(DateTime.UtcNow - t0).TotalSeconds:0.0} s: {e.Message}"); pipe?.Dispose(); pipe = null; return null; }
         finally { gate.Release(); }
+    }
+}
+
+/// <summary>Trust check: the pipe's server must be the running GnosisVPN service (the process the
+/// Service Control Manager reports for it). Any local process could otherwise create
+/// \\.\pipe\gnosisvpn first and make the app show its answers.</summary>
+public static class ServiceCheck
+{
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool GetNamedPipeServerProcessId(Microsoft.Win32.SafeHandles.SafePipeHandle pipe, out uint pid);
+    [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern IntPtr OpenSCManager(string? machine, string? db, uint access);
+    [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern IntPtr OpenService(IntPtr scm, string name, uint access);
+    [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)]
+    static extern bool QueryServiceStatusEx(IntPtr svc, int level, byte[] buf, int size, out int needed);
+    [System.Runtime.InteropServices.DllImport("advapi32.dll")]
+    static extern bool CloseServiceHandle(IntPtr h);
+
+    /// <summary>Process id of the GnosisVPN service, or 0 if it is not running.</summary>
+    public static uint ServicePid()
+    {
+        var scm = OpenSCManager(null, null, 0x0001 /* SC_MANAGER_CONNECT */);
+        if (scm == IntPtr.Zero) return 0;
+        try
+        {
+            var svc = OpenService(scm, "GnosisVPN", 0x0004 /* SERVICE_QUERY_STATUS */);
+            if (svc == IntPtr.Zero) return 0;
+            try
+            {
+                var buf = new byte[36];   // SERVICE_STATUS_PROCESS
+                if (!QueryServiceStatusEx(svc, 0 /* SC_STATUS_PROCESS_INFO */, buf, buf.Length, out _)) return 0;
+                return BitConverter.ToUInt32(buf, 4) == 4 /* SERVICE_RUNNING */ ? BitConverter.ToUInt32(buf, 28) : 0;
+            }
+            finally { CloseServiceHandle(svc); }
+        }
+        finally { CloseServiceHandle(scm); }
+    }
+
+    public static void Verify(NamedPipeClientStream pipe)
+    {
+        if (Environment.GetEnvironmentVariable("GNOSISVPN_TRUST_PIPE") == "1") return;   // developer: --serve in a console
+        if (!GetNamedPipeServerProcessId(pipe.SafePipeHandle, out var server)) throw new IOException("cannot identify the pipe's server");
+        var svc = ServicePid();
+        if (svc == 0 || svc != server) throw new UnauthorizedAccessException($"\\\\.\\pipe\\gnosisvpn is not served by the Gnosis VPN service (server pid {server}, service pid {svc})");
     }
 }
 
@@ -115,13 +161,17 @@ public sealed class RealBackend
         });
     }
 
+    /// <summary>For --selftest: feed a service reply as if it came from the pipe.</summary>
+    public void ApplyForTest(JsonNode? st, JsonNode? bal) => Apply(st, bal);
+
     void Apply(JsonNode? st, JsonNode? bal)
     {
         var S = g.S;
         if (st == null)
         {
             Core = "service not reachable: " + (link.LastError ?? "?");
-            S.Fail = new Failure { Title = "Can’t reach the Gnosis VPN service", Code = "SERVICE" };
+            var untrusted = link.LastError?.Contains("not served by") == true;
+            S.Fail = new Failure { Title = untrusted ? "Can’t verify the Gnosis VPN service" : "Can’t reach the Gnosis VPN service", Code = "SERVICE" };
             return;
         }
         if (S.Fail?.Code == "SERVICE") S.Fail = null;
