@@ -25,6 +25,8 @@ pub fn selftest() -> Result<(), String> {
 
 pub fn start_stream() {}
 
+pub fn flush_final(_max: std::time::Duration) {}
+
 pub fn flush_now() -> Result<(), String> {
     Err("release build: logs are never sent".into())
 }

@@ -477,6 +477,9 @@ unsafe extern "system" fn service_main(_argc: u32, _argv: *mut *mut u16) {
     } else {
         log::line("service: the teardown did not finish within 15 s; stopping anyway");
     }
+    // DEBUG FEATURE ONLY (no-op in release builds): the last log lines before the stop
+    set_stop_pending(16);
+    crate::relay::flush_final(std::time::Duration::from_secs(3));
     set_state(SERVICE_STOPPED, 0);
 }
 

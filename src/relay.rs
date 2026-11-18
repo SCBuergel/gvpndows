@@ -98,6 +98,7 @@ fn save_budget(b: &Budget) {
 
 static STARTED: OnceLock<()> = OnceLock::new();
 static FLUSH: AtomicBool = AtomicBool::new(false);
+static FINAL: AtomicBool = AtomicBool::new(false);
 static LAST_SEND: Mutex<Option<Instant>> = Mutex::new(None);
 
 /// Starts the log stream (once per process). Nothing is sent without a topic and a developer key.
@@ -123,6 +124,20 @@ pub fn flush_now() -> Result<(), String> {
     }
     FLUSH.store(true, Ordering::SeqCst);
     Ok(())
+}
+
+/// On service stop: send the remaining lines now (within the budget, ignoring the spacing) and wait
+/// up to `max` for it, so the last lines before a stop or update are not lost.
+pub fn flush_final(max: Duration) {
+    if STARTED.get().is_none() {
+        return;
+    }
+    let before = *LAST_SEND.lock().unwrap();
+    FINAL.store(true, Ordering::SeqCst);
+    let t = Instant::now();
+    while t.elapsed() < max && *LAST_SEND.lock().unwrap() == before {
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 /// Older callers (the e2e check, the egui app's button): same as flush_now.
@@ -164,7 +179,8 @@ fn stream() {
         let asked = FLUSH.load(Ordering::SeqCst);
         let periodic = since_last >= pure::stream_interval(budget.sent) * backoff as u64 && pure::may_send(budget.sent, false);
         let urgent = (error || asked) && since_last >= pure::error_spacing(budget.sent) * backoff as u64 && pure::may_send(budget.sent, true);
-        if !(periodic || urgent) {
+        let last_call = FINAL.swap(false, Ordering::SeqCst) && pure::may_send(budget.sent, true);
+        if !(periodic || urgent || last_call) {
             continue;
         }
         FLUSH.store(false, Ordering::SeqCst);
