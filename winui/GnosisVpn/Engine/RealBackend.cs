@@ -34,7 +34,10 @@ public sealed class ServiceLink
                     if (!Connected)
                     {
                         pipe?.Dispose();
-                        pipe = new NamedPipeClientStream(".", "gnosisvpn", PipeDirection.InOut, PipeOptions.Asynchronous);
+                        // exactly what the service grants interactive users: read plus FILE_WRITE_DATA
+                        // (GENERIC_WRITE would also ask for FILE_APPEND_DATA, the create-instance right)
+                        pipe = new NamedPipeClientStream(".", "gnosisvpn", PipeAccessRights.Read | PipeAccessRights.WriteData | PipeAccessRights.Synchronize,
+                            PipeOptions.Asynchronous, System.Security.Principal.TokenImpersonationLevel.Anonymous, HandleInheritability.None);
                         await pipe.ConnectAsync(1500);
                         ServiceCheck.Verify(pipe);
                         rd = new StreamReader(pipe, new UTF8Encoding(false)); wr = new StreamWriter(pipe, new UTF8Encoding(false)) { AutoFlush = true, NewLine = "\n" };

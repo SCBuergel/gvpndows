@@ -139,10 +139,13 @@ mod tests {
         v6[0] = 0x65;
         assert_eq!(hopr_leak_dst(&v6, &own), None, "IPv6");
         assert_eq!(hopr_leak_dst(&udp(9091, [1, 2, 3, 4], 5)[..21], &own), None, "truncated");
+        // IHL 2 would read the source port from bytes 8-9; byte 9 must stay 17 (UDP), so the port
+        // there is 0x0B11: with the IHL guard removed this packet would match
         let mut bad_ihl = udp(9091, [1, 2, 3, 4], 5);
         bad_ihl[0] = 0x42;
-        bad_ihl[8..10].copy_from_slice(&9091u16.to_be_bytes()); // where IHL 2 would put the source port
-        assert_eq!(hopr_leak_dst(&bad_ihl, &own), None, "IHL below 5");
+        bad_ihl[8] = 0x0B;
+        assert_eq!(bad_ihl[9], 17);
+        assert_eq!(hopr_leak_dst(&bad_ihl, &[0x0B11]), None, "IHL below 5");
     }
 
     #[test]

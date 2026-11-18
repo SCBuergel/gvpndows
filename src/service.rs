@@ -77,8 +77,31 @@ pub fn use_program_data() -> Result<(), String> {
                 eprintln!("gvpndows: {} was not created by the service (owner {owner:?}, link {link}); moved to {}", dir.display(), aside.display());
             }
         }
-        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        create_private_dir(&dir)?;
         secure_tree(&dir)?;
+    }
+    Ok(())
+}
+
+/// Creates the folder with its final security descriptor in one step (owner SYSTEM, SYSTEM and
+/// Administrators only), so there is no moment in which other users could put files into it.
+fn create_private_dir(dir: &Path) -> Result<(), String> {
+    use windows_sys::Win32::Storage::FileSystem::CreateDirectoryW;
+    if dir.exists() {
+        return Ok(()); // existing and trusted (checked above)
+    }
+    unsafe {
+        let mut sd: PSECURITY_DESCRIPTOR = null_mut();
+        if ConvertStringSecurityDescriptorToSecurityDescriptorW(wide(DIR_SDDL).as_ptr(), 1, &mut sd, null_mut()) == 0 {
+            return Err(format!("security descriptor: {}", std::io::Error::last_os_error()));
+        }
+        let sa = SECURITY_ATTRIBUTES { nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: sd, bInheritHandle: 0 };
+        let ok = CreateDirectoryW(wide(&dir.to_string_lossy()).as_ptr(), &sa) != 0;
+        let err = std::io::Error::last_os_error();
+        LocalFree(sd as _);
+        if !ok {
+            return Err(format!("creating {}: {err}", dir.display()));
+        }
     }
     Ok(())
 }
@@ -166,6 +189,14 @@ fn secure_tree(dir: &Path) -> Result<(), String> {
             // never follow a junction or symlink: securing its target would lock others out of it
             if std::fs::symlink_metadata(&p).map(|m| is_reparse_point(&m)).unwrap_or(true) {
                 std::fs::remove_file(&p).or_else(|_| std::fs::remove_dir(&p)).map_err(|e| format!("removing link {}: {e}", p.display()))?;
+                continue;
+            }
+            // never adopt what another user put here (a planted key): remove it
+            let owner = owner_sid(&p);
+            if !owner.as_deref().is_some_and(crate::pure::owner_trusted) {
+                let r = if p.is_dir() { std::fs::remove_dir_all(&p) } else { std::fs::remove_file(&p) };
+                r.map_err(|e| format!("removing {} (owner {owner:?}): {e}", p.display()))?;
+                eprintln!("gvpndows: removed {} (owner {owner:?}): not created by the service", p.display());
                 continue;
             }
             if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {

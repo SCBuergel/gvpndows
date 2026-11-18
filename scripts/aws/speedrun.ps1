@@ -7,7 +7,8 @@ $env:DOTNET_ROOT = "C:\dotnet"
 $out = "C:\gv\speed"; New-Item -ItemType Directory -Force $out | Out-Null
 function Log($m) { $l = (Get-Date).ToUniversalTime().ToString("HH:mm:ss") + " " + $m; Add-Content "$out\run.log" $l; $l }
 function Pipe($req) {
-  $c = New-Object System.IO.Pipes.NamedPipeClientStream(".", "gnosisvpn", [System.IO.Pipes.PipeDirection]::InOut)
+  # read + FILE_WRITE_DATA only: what the service grants interactive users
+  $c = New-Object System.IO.Pipes.NamedPipeClientStream(".", "gnosisvpn", [System.IO.Pipes.PipeAccessRights]"Read, WriteData, Synchronize", [System.IO.Pipes.PipeOptions]::None, [System.Security.Principal.TokenImpersonationLevel]::Anonymous, [System.IO.HandleInheritability]::None)
   try { $c.Connect(3000); $w = New-Object System.IO.StreamWriter($c); $w.AutoFlush = $true; $r = New-Object System.IO.StreamReader($c); $w.WriteLine($req); $r.ReadLine() | ConvertFrom-Json } catch { $null } finally { $c.Dispose() }
 }
 Remove-Item "$out\*" -ErrorAction SilentlyContinue
