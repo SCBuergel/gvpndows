@@ -355,10 +355,28 @@ fn serve_pipe() {
 fn start_all() {
     log::line(format!("service: starting (pid {}), data in {}", std::process::id(), gnosis::user_dirs().data.display()));
     gnosis::AUTO_CHECK.store(false, std::sync::atomic::Ordering::SeqCst);
-    if let Err(e) = gnosis::start() {
-        log::line(format!("service: core start failed: {e}"));
-    }
     std::thread::Builder::new().name("pipe".into()).spawn(serve_pipe).ok();
+    // The core needs the network at start (Blokli). At boot, after waking up or on a brief DNS
+    // failure it can fail; keep retrying instead of leaving the app waiting for a core forever.
+    std::thread::Builder::new()
+        .name("core-start".into())
+        .spawn(|| {
+            for n in 0u32.. {
+                match gnosis::start() {
+                    Ok(()) => {
+                        if n > 0 {
+                            log::line(format!("service: core started after {n} retries"));
+                        }
+                        return;
+                    }
+                    Err(e) if e.contains("already running") => return,
+                    Err(e) if n % 6 == 0 => log::line(format!("service: core start failed, retrying every 10 s: {e}")),
+                    Err(_) => {}
+                }
+                std::thread::sleep(std::time::Duration::from_secs(10));
+            }
+        })
+        .ok();
 }
 
 /// --serve: in the foreground until the process is ended.

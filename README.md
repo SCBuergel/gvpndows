@@ -14,7 +14,7 @@ Gnosis VPN for Windows, built step by step (same approach as the Android app in 
 
     WinUI app (GnosisVPN.exe, the signed-in user, unelevated)
         |  \\.\pipe\gnosisvpn, one JSON request per line
-    service "GnosisVPN" (C:\GnosisVPN\gvpndows.exe --service, LocalSystem, demand start)
+    service "GnosisVPN" (C:\GnosisVPN\gvpndows.exe --service, LocalSystem)
         |  client core (gnosis_vpn-lib) + Wintun adapter "GnosisVPN" + routes
     HOPR network -> exit
 
@@ -27,7 +27,10 @@ Gnosis VPN for Windows, built step by step (same approach as the Android app in 
   - State: `%ProgramData%\GnosisVPN` and `%ProgramData%\gvpndows`. Both are owned by SYSTEM and readable
     by SYSTEM and Administrators only, because they hold the node key. If they can't be secured, the
     service doesn't start.
-  - The service never connects on its own.
+  - The service never connects on its own. It starts the core at once and retries every 10 s until
+    the network allows it (Blokli must be reachable).
+  - Start type: `dist/windows/install.ps1` (the user install) makes it start with Windows (delayed)
+    and restart after a crash; `scripts/aws/service-install.ps1` (the test server) keeps it on demand.
   - `--serve` runs the same in an elevated console. The app then needs `GNOSISVPN_TRUST_PIPE=1`,
     because it otherwise trusts only the pipe served by the GnosisVPN service.
 - **App** (`winui/GnosisVpn`, C# / .NET 10 / Windows App SDK 1.8):
@@ -39,7 +42,8 @@ Gnosis VPN for Windows, built step by step (same approach as the Android app in 
 - **Not done yet:**
   - Lockdown (the WFP kill switch for the HOPR tunnel) is only a switch in the app.
   - The core reports no latency or load per exit, so exits show a neutral grade.
-  - There's no installer: `scripts/aws/service-install.ps1` sets up the service on a test machine.
+  - There's no signed installer: `dist/windows/` is a zip with `Install.cmd` (admin prompt, then
+    service, app in Program Files, Start menu entry) and `Uninstall.cmd`.
 
 ## Build
 
