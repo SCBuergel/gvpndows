@@ -122,7 +122,10 @@ public sealed class RealBackend
     readonly ServiceLink link = new(), cmdLink = new(), balLink = new();
     JsonNode? lastBal;
     readonly Action<Action> ui;
-    string? lastMode; int polls; double lastPollLog, pollStart, lastStuckLog; volatile string afterSend = "";
+    string? lastMode;
+    /// <summary>Route health per exit id, from the last status (why an exit cannot be reached).</summary>
+    readonly Dictionary<string, JsonNode?> health = new();
+    string? attemptDest; bool attemptSeen; double attemptAt; int polls; double lastPollLog, pollStart, lastStuckLog; volatile string afterSend = "";
     bool polling; double lastBalance = -1e9; string? pendingConnect; double pendingAt;
     public string NodeAddress { get; private set; } = "";
     public string Core { get; private set; } = "connecting to the service";
@@ -264,6 +267,8 @@ public sealed class RealBackend
                 ex.Add(e);
             }
             g.EX.Clear(); g.EX.AddRange(ex);
+            health.Clear();
+            foreach (var d in dests) if (d?["destination"]?["id"]?.ToString() is string hid) health[hid] = d?["route_health"];
         }
         if (g.EX.Count > 0 && g.ExOrNull(S.Loc) == null) S.Loc = curId ?? g.EX[0].Id;
 
@@ -294,6 +299,20 @@ public sealed class RealBackend
                 break;
         }
 
+        // A connect attempt the core gave up on (back to disconnected without the user asking): say why.
+        if (attemptDest != null)
+        {
+            if (kind is "connecting" or "reconnecting" && curId == attemptDest) attemptSeen = true;
+            else if (kind == "connected") attemptDest = null;
+            else if (kind is null or "disconnected" && pendingConnect == null && (attemptSeen || FakeEngine.Now - attemptAt > 20000))
+            {
+                var name = g.ExOrNull(attemptDest)?.City ?? attemptDest;
+                App.Log($"backend: connect to {attemptDest} ended without a connection: {WhyNot(attemptDest)}");
+                g.SetFlash("bad", $"Couldn’t connect to {name}.", WhyNot(attemptDest));
+                attemptDest = null;
+            }
+        }
+
         // the session's PIX payment: data left at this exit, and the exit holding traffic until it sees the payment
         var pix = conn?["pix"];
         if (pix != null && curId != null)
@@ -316,6 +335,58 @@ public sealed class RealBackend
             S.Balance = Math.Round(Wei(b["safe"]) * mbPerWx);
     }
 
+    /// <summary>The core's answer to connect: refusals are shown at once instead of a silent return to idle.</summary>
+    void ConnectReply(string dest, JsonNode? r)
+    {
+        var S = g.S;
+        var name = g.ExOrNull(dest)?.City ?? dest;
+        var resp = r?["data"] is JsonObject o && o["type"] != null ? o : r;
+        var type = resp?["type"]?.ToString();
+        string? why = r == null ? "The Gnosis VPN service did not answer (" + (cmdLink.LastError ?? "no reply") + ")."
+            : r["error"] is JsonNode err ? err.ToString()
+            : type == "unable_to_connect" ? Health(resp?["route_health"], null)
+            : null;
+        if (why != null)
+        {
+            if (S.Loc == dest) { S.Conn = "idle"; S.Pause = null; }
+            pendingConnect = null; attemptDest = null;
+            g.SetFlash("bad", $"Couldn’t connect to {name}.", why);
+            return;
+        }
+        if (type == "waiting_to_connect")
+            g.SetFlash("info", $"Waiting for a route to {name}.", Health(resp?["route_health"], null));
+    }
+
+    /// <summary>Why an exit cannot be reached, in words, from its route health in the status.</summary>
+    string WhyNot(string id) => Health(health.GetValueOrDefault(id), id);
+
+    static string Health(JsonNode? h, string? id)
+    {
+        var state = h?["state"]?["type"]?.ToString();
+        var reason = h?["state"]?["reason"];
+        var walk = h?["walk"];
+        var probeErr = h?["quick_probe"]?["last"]?["error"]?.ToString() ?? h?["quick_probe"]?["error"]?.ToString();
+        string text = state switch
+        {
+            "unrecoverable" => reason?["type"]?.ToString() switch
+            {
+                "not_allowed" => "This exit needs a route type the app does not allow.",
+                "incompatible_api_version" => "This exit runs a version this app cannot talk to.",
+                "cannot_open_session" => "The exit refused the session: " + reason?["error"],
+                var t => "The exit cannot be used (" + t + ").",
+            },
+            "not_routable" => walk?["type"]?.ToString() switch
+            {
+                "not_announced" => "The exit has not announced itself on the network, so there is no way to reach it.",
+                "no_path" => $"No relay path to the exit right now ({walk?["forward_count"]} forward, {walk?["return_count"]} return).",
+                _ => "There is no route to this exit right now.",
+            },
+            _ => "The exit did not answer the connection attempt.",
+        };
+        var last = h?["last_error"]?.ToString() ?? probeErr;
+        return last is { Length: > 0 } ? $"{text} Last error: {last}" : text;
+    }
+
     /// <summary>Actions the service carries out; true when handled here.</summary>
     public bool Handle(string a, string? id)
     {
@@ -333,11 +404,18 @@ public sealed class RealBackend
             if (S.Stack.LastOrDefault() == "pick") S.Stack.RemoveAt(S.Stack.Count - 1);
             S.Sheet = null; S.Loc = dest; S.Conn = "connecting"; S.CStart = FakeEngine.Now; S.CDur = 30000; pendingConnect = dest; pendingAt = FakeEngine.Now;
             if (a == "pick2" || a == "auto") S.Mode = a == "auto" ? "auto" : "manual";
-            _ = Task.Run(async () => { var r = await cmdLink.Send(new { type = "connect", destination = dest }, 70000, retry: false); App.Log("service: connect -> " + (r?.ToJsonString() is string j ? j[..Math.Min(200, j.Length)] : "no reply")); });
+            attemptDest = dest; attemptSeen = false; attemptAt = FakeEngine.Now;
+            _ = Task.Run(async () =>
+            {
+                var r = await cmdLink.Send(new { type = "connect", destination = dest }, 70000, retry: false);
+                App.Log("service: connect -> " + (r?.ToJsonString() is string j ? j[..Math.Min(300, j.Length)] : "no reply: " + cmdLink.LastError));
+                ui(() => ConnectReply(dest, r));
+            });
             return true;
         }
         if (a is "disconnect" or "cancel" or "offDo")
         {
+            attemptDest = null;
             S.Conn = "idle"; S.Pause = null; S.OffConfirm = false; pendingConnect = null;
             _ = Task.Run(async () => { var r = await cmdLink.Send(new { type = "disconnect" }, 70000, retry: false); App.Log("service: disconnect -> " + (r?.ToJsonString() is string j ? j[..Math.Min(200, j.Length)] : "no reply")); });
             return true;
