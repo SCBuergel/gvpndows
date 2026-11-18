@@ -63,8 +63,8 @@ public static class Shots
             else if (p == "closed") w.U.WinState = "closed";
             else if (p == "quit") w.U.WinState = "quit";
             else if (SIZES.TryGetValue(p, out var z)) size = z;
-            else if (p == "closewin") { var t = w.DispatcherQueue.CreateTimer(); t.Interval = TimeSpan.FromSeconds(2); t.IsRepeating = false; t.Tick += (_, _) => w.Close(); t.Start(); }
-            else if (p == "traymenu") { var t = w.DispatcherQueue.CreateTimer(); t.Interval = TimeSpan.FromSeconds(3); t.IsRepeating = false; t.Tick += (_, _) => Tray.OpenMenuAtIcon(); t.Start(); }
+            else if (p == "closewin") { var t = w.DispatcherQueue.CreateTimer(); t.Interval = TimeSpan.FromSeconds(2); t.IsRepeating = false; MainWindow.Pending.Add(t); t.Tick += (_, _) => { MainWindow.Pending.Remove(t); w.Close(); }; t.Start(); }
+            else if (p == "traymenu") { var t = w.DispatcherQueue.CreateTimer(); t.Interval = TimeSpan.FromSeconds(3); t.IsRepeating = false; MainWindow.Pending.Add(t); t.Tick += (_, _) => { MainWindow.Pending.Remove(t); Tray.OpenMenuAtIcon(); }; t.Start(); }
             else if (p == "trayfly") w.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => Tray.OpenFlyout(w));
         }
         w.Render();

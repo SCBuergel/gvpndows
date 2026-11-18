@@ -37,6 +37,9 @@ public sealed partial class MainWindow : Window
     readonly DispatcherQueue dq;
     readonly List<(string key, object el)> live = new();
     string curSig = "", curSoloSig = "";
+    Microsoft.UI.Dispatching.DispatcherQueueTimer? tickTimer, relayTimer;
+    /// <summary>One-shot timers that have not fired yet (kept alive until they do).</summary>
+    public static readonly HashSet<Microsoft.UI.Dispatching.DispatcherQueueTimer> Pending = new();
     bool rendering;
 
     public MainWindow()
@@ -55,7 +58,8 @@ public sealed partial class MainWindow : Window
         G.SetTimeout = (ms, a) =>
         {
             var t = dq.CreateTimer(); t.Interval = TimeSpan.FromMilliseconds(Math.Max(1, ms)); t.IsRepeating = false;
-            t.Tick += (_, _) => { t.Stop(); a(); };
+            Pending.Add(t);   // referenced until it fires: an unreferenced timer can be collected and never fire
+            t.Tick += (_, _) => { t.Stop(); Pending.Remove(t); a(); };
             t.Start();
         };
         G.Render += () => Render();
@@ -71,8 +75,10 @@ public sealed partial class MainWindow : Window
             G.Real = new RealBackend(G, a => dq.TryEnqueue(() => a()));
             App.Log("backend: Gnosis VPN service");
         }
-        var tick = dq.CreateTimer(); tick.Interval = TimeSpan.FromMilliseconds(250); tick.Tick += (_, _) => G.Tick(); tick.Start();
-        var relay = dq.CreateTimer(); relay.Interval = TimeSpan.FromMilliseconds(2600); relay.Tick += (_, _) => G.RelayTick(); relay.Start();
+        // Fields, not locals: a DispatcherQueueTimer nothing references is garbage-collected and stops
+        // firing. The tick drives the service polling; losing it froze the app on "Discovering the network".
+        tickTimer = dq.CreateTimer(); tickTimer.Interval = TimeSpan.FromMilliseconds(250); tickTimer.Tick += (_, _) => G.Tick(); tickTimer.Start();
+        relayTimer = dq.CreateTimer(); relayTimer.Interval = TimeSpan.FromMilliseconds(2600); relayTimer.Tick += (_, _) => G.RelayTick(); relayTimer.Start();
 
         BuildNav();
         Nav.ItemInvoked += (_, e) => { if (e.InvokedItemContainer?.Tag is string k) NavTo(k); };

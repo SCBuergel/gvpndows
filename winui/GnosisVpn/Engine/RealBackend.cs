@@ -19,10 +19,13 @@ public sealed class ServiceLink
     readonly SemaphoreSlim gate = new(1, 1);
     public bool Connected => pipe?.IsConnected == true;
     public string? LastError { get; private set; }
+    /// <summary>Debug: the step a request is in (logged by the poll watchdog when a poll stalls).</summary>
+    public volatile string Step = "idle";
 
     /// <param name="retry">resend once on a broken connection: only for requests that can safely repeat</param>
     public async Task<JsonNode?> Send(object cmd, int timeoutMs = 65000, bool retry = true)
     {
+        Step = "gate";
         await gate.WaitAsync();
         var t0 = DateTime.UtcNow;
         try
@@ -31,19 +34,25 @@ public sealed class ServiceLink
             {
                 try
                 {
+                    Step = "check connected";
                     if (!Connected)
                     {
+                        Step = "connect";
                         pipe?.Dispose();
                         // exactly what the service grants interactive users: read plus FILE_WRITE_DATA
                         // (GENERIC_WRITE would also ask for FILE_APPEND_DATA, the create-instance right)
                         pipe = new NamedPipeClientStream(".", "gnosisvpn", PipeAccessRights.Read | PipeAccessRights.WriteData | PipeAccessRights.Synchronize,
                             PipeOptions.Asynchronous, System.Security.Principal.TokenImpersonationLevel.Anonymous, HandleInheritability.None);
                         await pipe.ConnectAsync(1500);
+                        Step = "verify";
                         ServiceCheck.Verify(pipe);
                         rd = new StreamReader(pipe, new UTF8Encoding(false)); wr = new StreamWriter(pipe, new UTF8Encoding(false)) { AutoFlush = true, NewLine = "\n" };
                     }
+                    Step = "write";
                     await wr!.WriteLineAsync(JsonSerializer.Serialize(cmd));
+                    Step = "read";
                     var line = await rd!.ReadLineAsync().WaitAsync(TimeSpan.FromMilliseconds(timeoutMs));
+                    Step = "parse";
                     if (line == null) throw new IOException("service closed the connection");
                     LastError = null;
                     return JsonNode.Parse(line);
@@ -53,7 +62,7 @@ public sealed class ServiceLink
             return null;
         }
         catch (Exception e) { LastError = e.Message; App.Log($"service: {JsonSerializer.Serialize(cmd)} failed after {(DateTime.UtcNow - t0).TotalSeconds:0.0} s: {e.Message}"); pipe?.Dispose(); pipe = null; return null; }
-        finally { gate.Release(); }
+        finally { Step = "idle"; gate.Release(); }
     }
 }
 
@@ -113,6 +122,7 @@ public sealed class RealBackend
     readonly ServiceLink link = new(), cmdLink = new(), balLink = new();
     JsonNode? lastBal;
     readonly Action<Action> ui;
+    string? lastMode; int polls; double lastPollLog, pollStart, lastStuckLog; volatile string afterSend = "";
     bool polling; double lastBalance = -1e9; string? pendingConnect; double pendingAt;
     public string NodeAddress { get; private set; } = "";
     public string Core { get; private set; } = "connecting to the service";
@@ -148,22 +158,32 @@ public sealed class RealBackend
     /// <summary>Called by the engine's 250 ms tick; polls the service once a second.</summary>
     public void Tick()
     {
-        if (polling) return;
-        polling = true;
+        if (polling)
+        {
+            if (FakeEngine.Now - pollStart > 10000 && FakeEngine.Now - lastStuckLog > 10000) { lastStuckLog = FakeEngine.Now; App.Log($"poll stuck for {(FakeEngine.Now - pollStart) / 1000:0} s at step {link.Step} (poll #{polls}, after-send {afterSend})"); }
+            return;
+        }
+        polling = true; pollStart = FakeEngine.Now; afterSend = "send";
         _ = Task.Run(async () =>
         {
             try
             {
                 var st = await link.Send(new { type = "x_state" }, 5000);
+                polls++; afterSend = "got reply";
+                if (FakeEngine.Now - lastPollLog > 10000) { lastPollLog = FakeEngine.Now; App.Log($"poll #{polls}: {(st == null ? "no reply" : "mode " + (st["status"]?["data"]?["run_mode"]?["type"]?.ToString() ?? "-") + ", core " + st["core"])}"); }
                 if (st?["status"]?["data"]?["run_mode"]?["type"]?.ToString() == "running" && FakeEngine.Now - lastBalance > 15000)
                 {
                     lastBalance = FakeEngine.Now;
                     _ = Task.Run(async () => { var b = await balLink.Send(new { type = "balance" }, 60000); if (b != null) lastBal = b; });
                 }
-                var bal = lastBal; lastBal = null;
+                afterSend = "balance"; var bal = lastBal; lastBal = null;
+                afterSend = "dispatch";
                 ui(() => { try { Apply(st, bal); } catch (Exception e) { App.Log("apply: " + e); } });
+                afterSend = "delay";
                 await Task.Delay(1000);
+                afterSend = "done";
             }
+            catch (Exception e) { App.Log("poll: " + e); }
             finally { polling = false; }
         });
     }
@@ -197,6 +217,7 @@ public sealed class RealBackend
         DebugRelay = st["debug_relay"]?.GetValue<bool>() == true;
         var data = st["status"]?["data"];
         var mode = data?["run_mode"]?["type"]?.ToString();
+        if (mode != lastMode) { App.Log($"backend: run mode {lastMode ?? "-"} -> {mode ?? "-"}"); lastMode = mode; }
         switch (mode)
         {
             case null or "init" or "warmup" or "deploying_safe" or "restarting":
