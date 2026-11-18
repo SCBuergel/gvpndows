@@ -46,14 +46,28 @@ pub fn send_log() {
         if !cur.is_empty() {
             parts.push(cur);
         }
+        // A stalled tunnel also stalls DNS and HTTPS, so failed parts are retried every 30 s for
+        // up to 15 minutes (e.g. until the user disconnects); sent parts are not sent again.
         let n = parts.len();
-        for (i, p) in parts.iter().enumerate() {
-            if let Err(e) = post(&format!("gvpndows log {}/{n}", i + 1), p) {
-                crate::log::line(format!("sending the log failed at part {}/{n}: {e}", i + 1));
-                return;
+        let mut i = 0;
+        let mut tries = 0;
+        while i < n {
+            match post(&format!("gvpndows log {}/{n}", i + 1), &parts[i]) {
+                Ok(()) => i += 1,
+                Err(e) => {
+                    tries += 1;
+                    if tries > 30 {
+                        crate::log::line(format!("sending the log gave up at part {}/{n}: {e}", i + 1));
+                        return;
+                    }
+                    if tries == 1 {
+                        crate::log::line(format!("sending the log failed at part {}/{n}: {e}; retrying every 30 s", i + 1));
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(30));
+                }
             }
         }
-        crate::log::line(format!("log sent to the developer ({n} parts)"));
+        crate::log::line(format!("log sent to the developer ({n} parts{})", if tries > 0 { ", after retries" } else { "" }));
     });
 }
 

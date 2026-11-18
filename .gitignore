@@ -7,3 +7,5 @@ hopr.id
 hopr.pass
 /vendor
 /Cargo.lock
+/winui/*/bin
+/winui/*/obj

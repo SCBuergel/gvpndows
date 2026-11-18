@@ -2,7 +2,9 @@
 //! desktop "worker"; this module plays "root" for it (see `root`), like the Android bridge.
 
 pub mod backup;
+pub mod e2e;
 mod root;
+pub mod telemetry;
 
 use crate::log;
 use gnosis_vpn_lib::command::WorkerCommand;
@@ -28,6 +30,8 @@ static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 static TO_CORE: Mutex<Option<mpsc::Sender<WorkerToCore>>> = Mutex::new(None);
 static ROOT: Mutex<Option<root::Root>> = Mutex::new(None);
 static STARTED: AtomicBool = AtomicBool::new(false);
+/// The GUI's automatic check + log upload 30 s after connecting; off in --e2e (it would skew the measurements).
+pub static AUTO_CHECK: AtomicBool = AtomicBool::new(true);
 /// Last status reply as JSON (polled by a background thread for the UI).
 pub static STATUS: Mutex<Option<serde_json::Value>> = Mutex::new(None);
 pub static CORE_STATE: Mutex<String> = Mutex::new(String::new());
@@ -147,6 +151,18 @@ fn prepare_and_spawn() -> Result<(), String> {
     let params = WorkerParams::new(ConfigFileMode::Generated, AllowFlags::default(), blokli_url, blokli_ip, dirs, NETWORK.to_string());
     params.ensure_dirs().map_err(|e| format!("state dirs: {e}"))?;
     *ROOT.lock().unwrap() = Some(root::Root::new(blokli_ip));
+    let (leak_tx, leak_rx) = std::sync::mpsc::sync_channel::<std::net::Ipv4Addr>(1024);
+    root::set_leak_sender(leak_tx);
+    std::thread::Builder::new()
+        .name("hopr-bypass".into())
+        .spawn(move || {
+            while let Ok(ip) = leak_rx.recv() {
+                if with_root(|r| r.bypass_leak(ip)) == Some(true) {
+                    log::line(format!("bypass: HOPR traffic to {ip} was entering the tunnel (not in the core's peer list); routed around it"));
+                }
+            }
+        })
+        .map_err(|e| e.to_string())?;
 
     let (sender, mut from_core) = mpsc::channel(32);
     set_state(format!("starting (Blokli {blokli_ip}, network {NETWORK})"));
@@ -172,6 +188,7 @@ fn prepare_and_spawn() -> Result<(), String> {
         STARTED.store(false, Ordering::SeqCst);
     });
     start_status_poller();
+    telemetry::start();
     Ok(())
 }
 
@@ -253,7 +270,7 @@ pub fn disconnect() {
     });
 }
 
-fn short(v: &serde_json::Value) -> String {
+pub fn short(v: &serde_json::Value) -> String {
     let s = v.to_string();
     if s.len() > 300 { format!("{}...", &s[..s.char_indices().nth(300).map(|(i, _)| i).unwrap_or(s.len())]) } else { s }
 }
@@ -276,7 +293,7 @@ pub fn dest_names(data: &serde_json::Value) -> std::collections::HashMap<String,
 }
 
 /// "connected to GVPN-GER-1 (DE), payment funded" etc.
-fn connection_summary(c: &serde_json::Value, names: &std::collections::HashMap<String, String>) -> String {
+pub fn connection_summary(c: &serde_json::Value, names: &std::collections::HashMap<String, String>) -> String {
     let kind = c["type"].as_str().unwrap_or("?");
     let dest = c["destination"].as_str().map(|d| names.get(d).cloned().unwrap_or_else(|| d.to_string()));
     let mut s = match (kind, &dest) {
@@ -298,6 +315,9 @@ fn connection_summary(c: &serde_json::Value, names: &std::collections::HashMap<S
 /// 30 s after a new connection (past the exit's first payment hold): check the exit IP, DNS and
 /// speed through the tunnel, then send the log to the developer. No clicks needed.
 fn auto_check(since: u64) {
+    if !AUTO_CHECK.load(Ordering::SeqCst) {
+        return;
+    }
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(30));
         let still = STATUS.lock().unwrap().as_ref().map(|v| v["data"]["connection"]["since"].as_u64() == Some(since)).unwrap_or(false);

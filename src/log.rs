@@ -64,7 +64,7 @@ pub fn snapshot() -> Vec<String> {
 }
 
 /// UTC time as "YYYY-MM-DD HH:MM:SS.mmmZ" without a date crate.
-fn timestamp() -> String {
+pub fn timestamp() -> String {
     let d = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
     let secs = d.as_secs() as i64;
     let (days, rem) = (secs.div_euclid(86400), secs.rem_euclid(86400));

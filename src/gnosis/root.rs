@@ -13,6 +13,7 @@ use std::collections::BTreeSet;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -25,6 +26,84 @@ const RFC1918: [(Ipv4Addr, u8); 4] = [
     (Ipv4Addr::new(169, 254, 0, 0), 16),
 ];
 
+/// Packet counters between Windows and the core, sampled by `telemetry` (1 Hz).
+/// up = Windows -> core (what apps send), down = core -> Windows (what apps receive).
+pub struct TunCounters {
+    pub up_pkts: AtomicU64,
+    pub up_bytes: AtomicU64,
+    pub up_taken: AtomicU64,
+    pub down_pkts: AtomicU64,
+    pub down_bytes: AtomicU64,
+    pub dropped: AtomicU64,
+    /// Packets from this process's own UDP sockets (the HOPR node) that Windows routed into the
+    /// tunnel; dropped, and their destination gets a bypass route (see `leak_check`).
+    pub leaked: AtomicU64,
+}
+pub static TUN: TunCounters = TunCounters {
+    up_pkts: AtomicU64::new(0),
+    up_bytes: AtomicU64::new(0),
+    up_taken: AtomicU64::new(0),
+    down_pkts: AtomicU64::new(0),
+    down_bytes: AtomicU64::new(0),
+    dropped: AtomicU64::new(0),
+    leaked: AtomicU64::new(0),
+};
+
+/// Local UDP ports owned by this process (the HOPR node's sockets), refreshed every 5 s.
+static OWN_UDP_PORTS: Mutex<Vec<u16>> = Mutex::new(Vec::new());
+/// Destinations of leaked HOPR packets, for the bypass worker in `gnosis::mod`.
+static LEAK_TX: Mutex<Option<SyncSender<Ipv4Addr>>> = Mutex::new(None);
+
+pub fn set_leak_sender(tx: SyncSender<Ipv4Addr>) {
+    *LEAK_TX.lock().unwrap() = Some(tx);
+}
+
+fn own_udp_ports() -> Vec<u16> {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{GetExtendedUdpTable, MIB_UDPROW_OWNER_PID, UDP_TABLE_OWNER_PID};
+    let pid = std::process::id();
+    let mut size = 0u32;
+    unsafe {
+        GetExtendedUdpTable(std::ptr::null_mut(), &mut size, 0, 2 /* AF_INET */, UDP_TABLE_OWNER_PID, 0);
+        let mut buf = vec![0u32; (size as usize / 4) + 64];
+        size = (buf.len() * 4) as u32;
+        if GetExtendedUdpTable(buf.as_mut_ptr().cast(), &mut size, 0, 2, UDP_TABLE_OWNER_PID, 0) != 0 {
+            return Vec::new();
+        }
+        let n = buf[0] as usize;
+        let rows = std::slice::from_raw_parts(buf.as_ptr().add(1) as *const MIB_UDPROW_OWNER_PID, n);
+        rows.iter().filter(|r| r.dwOwningPid == pid).map(|r| u16::from_be(r.dwLocalPort as u16)).collect()
+    }
+}
+
+fn port_refresher() {
+    loop {
+        let ports = own_udp_ports();
+        *OWN_UDP_PORTS.lock().unwrap() = ports;
+        std::thread::sleep(Duration::from_secs(5));
+    }
+}
+
+/// True if this packet is the HOPR node's own UDP traffic (it must never enter the tunnel it
+/// carries); reports its destination for a bypass route.
+fn leak_check(p: &[u8]) -> bool {
+    if p.len() < 28 || p[0] >> 4 != 4 || p[9] != 17 {
+        return false;
+    }
+    let ihl = ((p[0] & 15) as usize) * 4;
+    if p.len() < ihl + 4 {
+        return false;
+    }
+    let sport = u16::from_be_bytes([p[ihl], p[ihl + 1]]);
+    if !OWN_UDP_PORTS.lock().map(|v| v.contains(&sport)).unwrap_or(false) {
+        return false;
+    }
+    TUN.leaked.fetch_add(1, Relaxed);
+    if let Some(tx) = LEAK_TX.lock().unwrap().as_ref() {
+        let _ = tx.try_send(Ipv4Addr::new(p[16], p[17], p[18], p[19]));
+    }
+    true
+}
+
 /// The Wintun session as the core's packet device. One permanent reader thread drains the
 /// ring into a channel, so any number of consumers (one per core reconnect) can poll it.
 struct WintunDevice {
@@ -36,7 +115,10 @@ impl gnosis_vpn_lib::wg_tunnel::PacketDevice for WintunDevice {
     fn recv_timeout(&self, timeout: Duration) -> io::Result<Option<Vec<u8>>> {
         let rx = self.rx.lock().map_err(|_| io::Error::other("tun channel poisoned"))?;
         match rx.recv_timeout(timeout) {
-            Ok(p) => Ok(Some(p)),
+            Ok(p) => {
+                TUN.up_taken.fetch_add(1, Relaxed);
+                Ok(Some(p))
+            }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Ok(None),
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(io::Error::other("tunnel adapter closed")),
         }
@@ -47,6 +129,8 @@ impl gnosis_vpn_lib::wg_tunnel::PacketDevice for WintunDevice {
         let mut p = self.session.allocate_send_packet(len).map_err(|e| io::Error::other(e.to_string()))?;
         p.bytes_mut().copy_from_slice(packet);
         self.session.send_packet(p);
+        TUN.down_pkts.fetch_add(1, Relaxed);
+        TUN.down_bytes.fetch_add(packet.len() as u64, Relaxed);
         Ok(())
     }
 }
@@ -55,10 +139,18 @@ fn reader_thread(session: Arc<wintun::Session>, tx: SyncSender<Vec<u8>>) {
     let mut dropped = 0u64;
     loop {
         let Ok(pkt) = session.receive_blocking() else { break }; // session shut down
+        let len = pkt.bytes().len() as u64;
+        if leak_check(pkt.bytes()) {
+            continue;
+        }
         match tx.try_send(pkt.bytes().to_vec()) {
-            Ok(()) => {}
+            Ok(()) => {
+                TUN.up_pkts.fetch_add(1, Relaxed);
+                TUN.up_bytes.fetch_add(len, Relaxed);
+            }
             Err(TrySendError::Full(_)) => {
                 dropped += 1;
+                TUN.dropped.fetch_add(1, Relaxed);
                 if dropped.is_power_of_two() {
                     log::line(format!("tunnel: {dropped} packets dropped (core not reading)"));
                 }
@@ -107,6 +199,11 @@ impl Root {
         let session = Arc::new(adapter.start_session(wintun::MAX_RING_CAPACITY).map_err(|e| format!("Wintun session: {e}"))?);
         let (tx, rx) = sync_channel(4096);
         let s = session.clone();
+        static PORTS: std::sync::Once = std::sync::Once::new();
+        PORTS.call_once(|| {
+            *OWN_UDP_PORTS.lock().unwrap() = own_udp_ports();
+            let _ = std::thread::Builder::new().name("udp-ports".into()).spawn(port_refresher);
+        });
         std::thread::Builder::new().name("wintun-reader".into()).spawn(move || reader_thread(s, tx)).map_err(|e| e.to_string())?;
         gnosis_vpn_lib::wg_tunnel::set_packet_device(Arc::new(WintunDevice { session: session.clone(), rx: Mutex::new(rx) }));
         log::line(format!("tunnel adapter {ADAPTER_NAME} created (luid {luid:#x})"));
@@ -206,6 +303,18 @@ impl Root {
             t0.elapsed().as_millis()
         ));
         Ok(ADAPTER_NAME.to_string())
+    }
+
+    /// A HOPR peer outside the core's peer list was reached through the tunnel: route it around.
+    pub fn bypass_leak(&mut self, ip: Ipv4Addr) -> bool {
+        if self.bypass_peers.contains(&ip) || self.tunnel_routes.is_empty() {
+            return false;
+        }
+        let Some(tun_luid) = self.adapter.as_ref().map(|a| a.luid) else { return false };
+        let Ok(wan) = self.wan(tun_luid) else { return false };
+        self.add_bypass(IpAddr::V4(ip), 32, wan);
+        self.bypass_peers.insert(ip);
+        true
     }
 
     pub fn update_peer_ips(&mut self, peer_ips: &[Ipv4Addr]) {

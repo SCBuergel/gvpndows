@@ -10,6 +10,8 @@ mod wgconf;
 #[cfg(windows)]
 mod gnosis;
 #[cfg(windows)]
+mod service;
+#[cfg(windows)]
 mod win;
 
 use eframe::egui;
@@ -18,6 +20,12 @@ use std::time::{Duration, Instant};
 use tunnel::{ConnectParams, Status, Tunnel};
 
 fn main() {
+    #[cfg(windows)]
+    let svc = std::env::args().any(|a| a == "--service" || a == "--serve");
+    #[cfg(windows)]
+    if svc {
+        service::use_program_data();
+    }
     let log_file = log::init();
     std::panic::set_hook(Box::new(|info| {
         log::line(format!("PANIC: {info}"));
@@ -55,6 +63,28 @@ fn main() {
         }
         log::line("selftest ok");
         return;
+    }
+
+    // --service / --serve: the core and tunnel for the WinUI app (see service.rs)
+    #[cfg(windows)]
+    if svc {
+        if std::env::args().any(|a| a == "--service") {
+            if !service::run_service() {
+                log::line("service: not started by the Service Control Manager; use --serve in a console");
+            }
+        } else {
+            service::run_console();
+        }
+        return;
+    }
+
+    // --e2e PLAN: headless end-to-end test (see gnosis/e2e.rs), e.g. --e2e "ger@0,ger@60,fra@0".
+    #[cfg(windows)]
+    if let Some(i) = std::env::args().position(|a| a == "--e2e") {
+        let plan = std::env::args().nth(i + 1).unwrap_or_default();
+        let rc = gnosis::e2e::run(&plan);
+        log::line(format!("e2e exit code {rc}"));
+        std::process::exit(rc);
     }
 
     // --core-test: start the Gnosis VPN core headless, log its progress for 150 s, exit
