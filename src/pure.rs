@@ -9,6 +9,8 @@ pub const MAX_REQUEST: usize = 64 * 1024;
 /// Core commands the app may send over the pipe. Funding commands (`funding_tool` takes a secret,
 /// `fund_pix_pool` moves funds) and the probing controls are not reachable from the pipe.
 pub const ALLOWED_COMMANDS: [&str; 6] = ["status", "connect", "disconnect", "balance", "destinations", "nerd_stats"];
+/// Longest connect destination (an exit's handle or 0x address); the core logs unknown ones.
+pub const MAX_DESTINATION: usize = 256;
 
 #[derive(Debug, PartialEq)]
 pub enum PipeRoute {
@@ -39,6 +41,11 @@ pub fn route_request(line: &str) -> PipeRoute {
         Some("x_start") => PipeRoute::Start,
         Some("x_send_log") => PipeRoute::SendLog,
         Some("x_app_log") => PipeRoute::AppLog,
+        // the core logs the destination: no control characters (forged log lines), bounded size
+        Some("connect") => match v["destination"].as_str() {
+            Some(d) if d.len() <= MAX_DESTINATION && !d.chars().any(char::is_control) => PipeRoute::Command,
+            _ => PipeRoute::Rejected(format!("connect needs a \"destination\" string of at most {MAX_DESTINATION} bytes without control characters")),
+        },
         Some(t) if ALLOWED_COMMANDS.contains(&t) => PipeRoute::Command,
         Some(t) => PipeRoute::Rejected(format!("command {t:?} is not available over the pipe")),
         None => PipeRoute::Rejected("request has no \"type\"".into()),
