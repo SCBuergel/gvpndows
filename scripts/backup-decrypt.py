@@ -64,7 +64,8 @@ def process(priv, out, lines):
             print(f"skipped a message: {type(e).__name__}: not a valid backup")
             continue
         try:
-            print("  address in hopr.id:", json.loads(files["hopr.id"]).get("address"))
+            addr = str(json.loads(files["hopr.id"]).get("address"))
+            print("  address in hopr.id:", "".join(c if c.isprintable() else "?" for c in addr))
         except Exception:
             pass
         n += 1
