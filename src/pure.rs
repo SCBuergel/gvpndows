@@ -1,5 +1,5 @@
 //! Platform-independent logic split out of the Windows code so it can be unit-tested anywhere:
-//! pipe request routing, the HOPR leak check on tunnel packets, the tunnel routes to add, log chunking, e2e plan steps.
+//! pipe request routing, the HOPR leak check on tunnel packets, the tunnel routes to add, the WAN, log chunking, e2e plan steps.
 
 use std::net::Ipv4Addr;
 
@@ -43,6 +43,12 @@ pub fn route_request(line: &str) -> PipeRoute {
         Some(t) => PipeRoute::Rejected(format!("command {t:?} is not available over the pipe")),
         None => PipeRoute::Rejected("request has no \"type\"".into()),
     }
+}
+
+/// The WAN among the IPv4 default routes (interface LUID, next hop, route + interface metric): the
+/// lowest metric, never the tunnel's own interface.
+pub fn pick_wan(defaults: &[(u64, std::net::IpAddr, u32)], tun_luid: u64) -> Option<(u64, std::net::IpAddr)> {
+    defaults.iter().filter(|d| d.0 != tun_luid).min_by_key(|d| (d.2, d.0)).map(|d| (d.0, d.1))
 }
 
 /// The destination of an IPv4 UDP packet whose source port is one of `own_ports` (this process's

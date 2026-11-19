@@ -2,9 +2,9 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use windows_sys::Win32::NetworkManagement::IpHelper::{
-    CreateIpForwardEntry2, CreateUnicastIpAddressEntry, DeleteIpForwardEntry2, DeleteUnicastIpAddressEntry, GetBestRoute2, GetIpInterfaceEntry,
+    CreateIpForwardEntry2, CreateUnicastIpAddressEntry, DeleteIpForwardEntry2, DeleteUnicastIpAddressEntry, GetBestRoute2, GetIpForwardTable2, GetIpInterfaceEntry, FreeMibTable,
     InitializeIpForwardEntry, InitializeIpInterfaceEntry, InitializeUnicastIpAddressEntry, SetIpInterfaceEntry,
-    MIB_IPFORWARD_ROW2, MIB_IPINTERFACE_ROW, MIB_UNICASTIPADDRESS_ROW,
+    MIB_IPFORWARD_ROW2, MIB_IPFORWARD_TABLE2, MIB_IPINTERFACE_ROW, MIB_UNICASTIPADDRESS_ROW,
 };
 use windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH;
 use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6, SOCKADDR_INET};
@@ -154,5 +154,27 @@ pub fn best_route(dest: IpAddr) -> Result<(u64, IpAddr), String> {
             GetBestRoute2(std::ptr::null(), 0, std::ptr::null(), &d, 0, &mut row, &mut src),
         )?;
         Ok((row.InterfaceLuid.Value, ip_of(&row.NextHop)))
+    }
+}
+
+/// The IPv4 default routes (0.0.0.0/0) on connected interfaces: (interface LUID, next hop, route
+/// metric + interface metric, the sum Windows ranks them by).
+pub fn default_routes() -> Result<Vec<(u64, IpAddr, u32)>, String> {
+    unsafe {
+        let mut table: *mut MIB_IPFORWARD_TABLE2 = std::ptr::null_mut();
+        check("reading the route table", GetIpForwardTable2(AF_INET, &mut table))?;
+        let rows = std::slice::from_raw_parts((*table).Table.as_ptr(), (*table).NumEntries as usize);
+        let mut out = Vec::new();
+        for r in rows.iter().filter(|r| r.DestinationPrefix.PrefixLength == 0) {
+            let mut i: MIB_IPINTERFACE_ROW = std::mem::zeroed();
+            InitializeIpInterfaceEntry(&mut i);
+            i.Family = AF_INET;
+            i.InterfaceLuid = r.InterfaceLuid;
+            if GetIpInterfaceEntry(&mut i) == 0 && i.Connected != 0 {
+                out.push((r.InterfaceLuid.Value, ip_of(&r.NextHop), r.Metric.saturating_add(i.Metric)));
+            }
+        }
+        FreeMibTable(table as *const _);
+        Ok(out)
     }
 }

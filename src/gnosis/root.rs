@@ -218,19 +218,50 @@ impl Root {
         Ok(luid)
     }
 
-    /// The WAN route, looked up towards Blokli; never our own tunnel.
+    /// The WAN: the best IPv4 default route outside our tunnel, read from the route table, so our own
+    /// /1 and /32 routes cannot hide a network switch (the route towards Blokli only if the table
+    /// has none). When it changed, the bypass routes made for the old WAN go, to be added again.
     fn wan(&mut self, tun_luid: u64) -> Result<(u64, IpAddr), String> {
-        let probe = IpAddr::V4(self.blokli_ip.unwrap_or(Ipv4Addr::new(9, 9, 9, 9)));
-        match net::best_route(probe) {
-            Ok((luid, gw)) if luid != tun_luid => {
-                if self.wan != Some((luid, gw)) {
-                    log::line(format!("WAN: next hop {gw}, if luid {luid:#x}"));
-                }
-                self.wan = Some((luid, gw));
-                Ok((luid, gw))
+        let found = net::default_routes().ok().and_then(|d| crate::pure::pick_wan(&d, tun_luid)).or_else(|| {
+            let probe = IpAddr::V4(self.blokli_ip.unwrap_or(Ipv4Addr::new(9, 9, 9, 9)));
+            net::best_route(probe).ok().filter(|&(luid, _)| luid != tun_luid)
+        });
+        let Some((luid, gw)) = found else {
+            return self.wan.ok_or_else(|| "cannot determine the WAN route".to_string());
+        };
+        if self.wan != Some((luid, gw)) {
+            log::line(format!("WAN: next hop {gw}, if luid {luid:#x}"));
+            if self.wan.is_some() && !self.bypass_peers.is_empty() {
+                log::line("WAN changed: renewing the bypass routes");
+                self.remove_bypass();
             }
-            _ => self.wan.ok_or_else(|| "cannot determine the WAN route".to_string()),
         }
+        self.wan = Some((luid, gw));
+        Ok((luid, gw))
+    }
+
+    fn remove_bypass(&mut self) {
+        for r in self.bypass.drain(..).rev() {
+            if let Err(e) = net::delete_route(&r) {
+                log::line(format!("bypass: {e}"));
+            }
+        }
+        self.bypass_peers.clear();
+    }
+
+    /// Adds the bypass routes still missing for `peers` (and the LAN ranges); returns how many peers were new.
+    fn add_bypass_peers(&mut self, peers: BTreeSet<Ipv4Addr>, wan: (u64, IpAddr)) -> usize {
+        let new: Vec<Ipv4Addr> = peers.difference(&self.bypass_peers).copied().collect();
+        for p in &new {
+            self.add_bypass(IpAddr::V4(*p), 32, wan);
+        }
+        self.bypass_peers.extend(new.iter().copied());
+        if !self.bypass.iter().any(|r| r.prefix_len < 32) {
+            for (net, l) in RFC1918 {
+                self.add_bypass(IpAddr::V4(net), l, wan);
+            }
+        }
+        new.len()
     }
 
     fn add_bypass(&mut self, dest: IpAddr, len: u8, wan: (u64, IpAddr)) {
@@ -259,15 +290,7 @@ impl Root {
             self.service_ips = hosts.iter().flat_map(|h| resolve_v4(h)).collect();
         }
         peers.extend(self.service_ips.iter().copied());
-        for p in peers.difference(&self.bypass_peers.clone()).copied().collect::<Vec<_>>() {
-            self.add_bypass(IpAddr::V4(p), 32, wan);
-        }
-        self.bypass_peers.extend(peers);
-        if !self.bypass.iter().any(|r| r.prefix_len < 32) {
-            for (net, l) in RFC1918 {
-                self.add_bypass(IpAddr::V4(net), l, wan);
-            }
-        }
+        self.add_bypass_peers(peers, wan);
 
         // 2. Address, MTU, metric.
         let adapter = self.adapter.as_mut().expect("adapter");
@@ -321,13 +344,13 @@ impl Root {
         }
         let Some(tun_luid) = self.adapter.as_ref().map(|a| a.luid) else { return };
         let Ok(wan) = self.wan(tun_luid) else { return };
-        let new: Vec<Ipv4Addr> = peer_ips.iter().filter(|p| !self.bypass_peers.contains(p)).copied().collect();
-        for p in &new {
-            self.add_bypass(IpAddr::V4(*p), 32, wan);
-            self.bypass_peers.insert(*p);
-        }
-        if !new.is_empty() {
-            log::line(format!("bypass: {} new HOPR peer routes", new.len()));
+        // all of them, as a WAN change removed the bypass routes
+        let mut peers: BTreeSet<Ipv4Addr> = peer_ips.iter().copied().collect();
+        peers.extend(self.blokli_ip);
+        peers.extend(self.service_ips.iter().copied());
+        let new = self.add_bypass_peers(peers, wan);
+        if new > 0 {
+            log::line(format!("bypass: {new} new peer routes"));
         }
     }
 
@@ -338,12 +361,7 @@ impl Root {
                 log::line(format!("teardown: {e}"));
             }
         }
-        for r in self.bypass.drain(..).rev() {
-            if let Err(e) = net::delete_route(&r) {
-                log::line(format!("teardown: {e}"));
-            }
-        }
-        self.bypass_peers.clear();
+        self.remove_bypass();
         log::line("tunnel routes removed");
     }
 
