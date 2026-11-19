@@ -1373,7 +1373,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parking_lot 0.12.5",
  "percent-encoding",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
  "x11rb",
 ]
 
@@ -3949,7 +3949,7 @@ dependencies = [
 [[package]]
 name = "edgli"
 version = "5.3.0"
-source = "git+https://github.com/hoprnet/edge-client.git?branch=main#6455a823cd943de04db2f236bbb1110bfbf52c82"
+source = "git+https://github.com/hoprnet/edge-client.git?branch=main#7bafb4723683f826b5fad856cd8622748b823f57"
 dependencies = [
  "anyhow",
  "async-signal",
@@ -4268,7 +4268,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4928,7 +4928,7 @@ dependencies = [
 
 [[package]]
 name = "gnosis_vpn-ctl"
-version = "1.0.1"
+version = "1.1.1"
 dependencies = [
  "bytesize",
  "clap",
@@ -4944,7 +4944,7 @@ dependencies = [
 
 [[package]]
 name = "gnosis_vpn-ipc"
-version = "1.0.1"
+version = "1.1.1"
 dependencies = [
  "base64 0.23.1",
  "humantime",
@@ -4958,7 +4958,7 @@ dependencies = [
 
 [[package]]
 name = "gnosis_vpn-lib"
-version = "1.0.1"
+version = "1.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5007,7 +5007,7 @@ dependencies = [
 
 [[package]]
 name = "gnosis_vpn-root"
-version = "1.0.1"
+version = "1.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5036,7 +5036,7 @@ dependencies = [
 
 [[package]]
 name = "gnosis_vpn-system_tests"
-version = "1.0.1"
+version = "1.1.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -5057,7 +5057,7 @@ dependencies = [
 
 [[package]]
 name = "gnosis_vpn-worker"
-version = "1.0.1"
+version = "1.1.1"
 dependencies = [
  "clap",
  "exitcode",
@@ -8061,7 +8061,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -9367,7 +9367,7 @@ dependencies = [
  "once_cell",
  "socket2 0.6.5",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -9379,7 +9379,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "socket2 0.6.5",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -9914,7 +9914,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -9973,7 +9973,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -10943,7 +10943,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.6",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11990,7 +11990,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
