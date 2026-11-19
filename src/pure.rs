@@ -292,6 +292,30 @@ pub fn serve_pipe_loop<P: PipeServer>(p: &mut P) {
     }
 }
 
+/// What a command and its reply do to the connect target a restarted core resumes (as upstream
+/// root's target_dest_id): an accepted connect sets it to the reply's destination id, a
+/// disconnect clears it whatever the reply, anything else keeps it.
+#[derive(Debug, PartialEq)]
+pub enum TargetChange {
+    Set(String),
+    Clear,
+    Keep,
+}
+
+pub fn target_change(cmd_type: &str, reply: Option<&serde_json::Value>) -> TargetChange {
+    match cmd_type {
+        "disconnect" => TargetChange::Clear,
+        "connect" => {
+            let r = reply.filter(|r| r["type"] == "connect").map(|r| &r["data"]);
+            match r.filter(|d| matches!(d["type"].as_str(), Some("connecting" | "waiting_to_connect" | "already_connected"))) {
+                Some(d) => d["destination"]["id"].as_str().map_or(TargetChange::Keep, |id| TargetChange::Set(id.into())),
+                None => TargetChange::Keep,
+            }
+        }
+        _ => TargetChange::Keep,
+    }
+}
+
 /// Restart of the core after it ended on its own (upstream root respawns its worker the same way):
 /// the attempt number and the seconds to wait. A run of 10 minutes or more resets the count; the
 /// wait starts at 5 s and doubles to at most 5 minutes, so a permanent failure never loops tightly.

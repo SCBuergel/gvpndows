@@ -35,6 +35,8 @@ static ROOT: Mutex<Option<root::Root>> = Mutex::new(None);
 static STARTED: AtomicBool = AtomicBool::new(false);
 /// Set by `shutdown()`: the core then stays down (no restart, no new start).
 static STOPPING: AtomicBool = AtomicBool::new(false);
+/// The connect target a restarted core resumes (see `pure::target_change`); cleared by `shutdown()`.
+static TARGET: Mutex<Option<String>> = Mutex::new(None);
 /// Restarts since the last long run (see `pure::core_restart`).
 static RESTARTS: AtomicU32 = AtomicU32::new(0);
 /// The GUI's automatic check + log upload 30 s after connecting; off in --e2e (it would skew the measurements).
@@ -163,6 +165,11 @@ fn prepare_and_spawn() -> Result<(), String> {
     *ROOT.lock().unwrap() = Some(root::Root::new(blokli_ip));
 
     let (sender, mut from_core) = mpsc::channel(32);
+    // None at the first start; after the core ended on its own, the connection it was making
+    let target = TARGET.lock().unwrap().clone();
+    if let Some(t) = &target {
+        log::line(format!("gnosis: the new core resumes the connection to {t}"));
+    }
     set_state(format!("starting (Blokli {blokli_ip}, network {NETWORK})"));
     runtime().spawn(async move {
         let t0 = std::time::Instant::now();
@@ -178,7 +185,7 @@ fn prepare_and_spawn() -> Result<(), String> {
                 set_state(format!("init failed: state dirs: {e}"));
                 return;
             }
-            match Core::init(config, params, None, sender).await {
+            match Core::init(config, params, target, sender).await {
                 Ok((core, to_core)) => {
                     *TO_CORE.lock().unwrap() = Some(to_core);
                     tokio::spawn(async move {
@@ -284,6 +291,17 @@ fn handle_request(req: RequestToRoot) {
 /// {"type":"disconnect"}) and returns the core's Response as JSON. Blocking (up to 60 s).
 pub fn command(json: &str) -> Result<serde_json::Value, String> {
     let cmd: WorkerCommand = serde_json::from_str(json).map_err(|e| format!("bad command: {e}"))?;
+    let ty = serde_json::from_str::<serde_json::Value>(json).ok().and_then(|v| v["type"].as_str().map(String::from)).unwrap_or_default();
+    let res = send_command(cmd);
+    match crate::pure::target_change(&ty, res.as_ref().ok()) {
+        crate::pure::TargetChange::Set(t) => *TARGET.lock().unwrap() = Some(t),
+        crate::pure::TargetChange::Clear => *TARGET.lock().unwrap() = None,
+        crate::pure::TargetChange::Keep => {}
+    }
+    res
+}
+
+fn send_command(cmd: WorkerCommand) -> Result<serde_json::Value, String> {
     let tx = TO_CORE.lock().unwrap().clone().ok_or("core is not running yet")?;
     runtime().block_on(async move {
         let (resp, rx) = oneshot::channel();
@@ -430,6 +448,7 @@ fn start_status_poller() {
 /// Tears the tunnel down on app exit (the core's own shutdown is best effort).
 pub fn shutdown() {
     STOPPING.store(true, Ordering::SeqCst);
+    TARGET.lock().unwrap().take();
     if let Some(tx) = TO_CORE.lock().unwrap().take() {
         let _ = tx.try_send(WorkerToCore::Shutdown);
     }
