@@ -30,7 +30,8 @@ Gnosis VPN for Windows, built step by step (same approach as the Android app in 
     by SYSTEM and Administrators only, because they hold the node key. If they can't be secured, the
     service doesn't start.
   - The service never connects on its own. It starts the core at once and retries every 10 s until
-    the network allows it (Blokli must be reachable).
+    the network allows it (Blokli must be reachable). When the core ends on its own (a final connect
+    error, Blokli moved), it starts it again, after 5 s and backing off to 5 minutes.
   - Start type: `dist/windows/install.ps1` (the user install) makes it start with Windows (delayed)
     and restart after a crash.
   - `--serve` runs the same in an elevated console. The app then needs `GNOSISVPN_TRUST_PIPE=1`,

@@ -240,6 +240,14 @@ pub fn serve_pipe_loop<P: PipeServer>(p: &mut P) {
     }
 }
 
+/// Restart of the core after it ended on its own (upstream root respawns its worker the same way):
+/// the attempt number and the seconds to wait. A run of 10 minutes or more resets the count; the
+/// wait starts at 5 s and doubles to at most 5 minutes, so a permanent failure never loops tightly.
+pub fn core_restart(prev_attempt: u32, ran_secs: u64) -> (u32, u64) {
+    let attempt = if ran_secs >= 600 { 1 } else { prev_attempt.saturating_add(1) };
+    (attempt, (5u64 << (attempt - 1).min(6)).min(300))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -17,7 +17,7 @@ use gnosis_vpn_lib::worker_params::{AllowFlags, ConfigFileMode, SpawnParams};
 use gnosis_vpn_ipc::dirs::UserDirs;
 use std::net::{IpAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tokio::runtime::Runtime;
@@ -33,6 +33,10 @@ static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 static TO_CORE: Mutex<Option<mpsc::Sender<WorkerToCore>>> = Mutex::new(None);
 static ROOT: Mutex<Option<root::Root>> = Mutex::new(None);
 static STARTED: AtomicBool = AtomicBool::new(false);
+/// Set by `shutdown()`: the core then stays down (no restart, no new start).
+static STOPPING: AtomicBool = AtomicBool::new(false);
+/// Restarts since the last long run (see `pure::core_restart`).
+static RESTARTS: AtomicU32 = AtomicU32::new(0);
 /// The GUI's automatic check + log upload 30 s after connecting; off in --e2e (it would skew the measurements).
 pub static AUTO_CHECK: AtomicBool = AtomicBool::new(true);
 /// Last status reply as JSON (polled by a background thread for the UI).
@@ -118,6 +122,9 @@ fn init_tracing() {
 
 /// Starts the core in the background: identity, Blokli, HOPR node. Progress shows in the status.
 pub fn start() -> Result<(), String> {
+    if STOPPING.load(Ordering::SeqCst) {
+        return Err("service is stopping".into());
+    }
     if STARTED.swap(true, Ordering::SeqCst) {
         return Err("core already running".into());
     }
@@ -158,37 +165,70 @@ fn prepare_and_spawn() -> Result<(), String> {
     let (sender, mut from_core) = mpsc::channel(32);
     set_state(format!("starting (Blokli {blokli_ip}, network {NETWORK})"));
     runtime().spawn(async move {
-        let params = spawn
-            .query_network(Duration::from_secs(15), Duration::from_secs(3), |kind, msg| log::line(format!("gnosis: Blokli not ready ({kind:?}): {msg}")))
-            .await;
-        if let Err(e) = params.ensure_dirs() {
-            set_state(format!("init failed: state dirs: {e}"));
-            STARTED.store(false, Ordering::SeqCst);
-            return;
-        }
-        match Core::init(config, params, None, sender).await {
-            Ok((core, to_core)) => {
-                *TO_CORE.lock().unwrap() = Some(to_core);
-                tokio::spawn(async move {
-                    while let Some(CoreToWorker::RequestToRoot(req)) = from_core.recv().await {
-                        handle_request(req);
-                    }
-                });
-                set_state("running");
-                core.start().await;
-                TO_CORE.lock().unwrap().take();
-                set_state("stopped");
+        let t0 = std::time::Instant::now();
+        // `return` ends this run only; the cleanup below always follows
+        async move {
+            let params = spawn
+                .query_network(Duration::from_secs(15), Duration::from_secs(3), |kind, msg| log::line(format!("gnosis: Blokli not ready ({kind:?}): {msg}")))
+                .await;
+            if STOPPING.load(Ordering::SeqCst) {
+                return;
             }
-            Err(e) => set_state(format!("init failed: {e}")),
+            if let Err(e) = params.ensure_dirs() {
+                set_state(format!("init failed: state dirs: {e}"));
+                return;
+            }
+            match Core::init(config, params, None, sender).await {
+                Ok((core, to_core)) => {
+                    *TO_CORE.lock().unwrap() = Some(to_core);
+                    tokio::spawn(async move {
+                        while let Some(CoreToWorker::RequestToRoot(req)) = from_core.recv().await {
+                            handle_request(req);
+                        }
+                    });
+                    set_state("running");
+                    core.start().await;
+                    TO_CORE.lock().unwrap().take();
+                    set_state("stopped");
+                }
+                Err(e) => set_state(format!("init failed: {e}")),
+            }
         }
+        .await;
+        // no stale run mode or connection for the app once the core is gone
+        *STATUS.lock().unwrap() = None;
         if let Some(mut r) = ROOT.lock().unwrap().take() {
             r.shutdown();
         }
         STARTED.store(false, Ordering::SeqCst);
+        schedule_restart(t0.elapsed());
     });
     start_status_poller();
     telemetry::start();
     Ok(())
+}
+
+/// The core ended without `shutdown()` (it exits on purpose for a final connect error or a Blokli
+/// move, or init failed): start it again after a backoff, like upstream root respawns the worker.
+fn schedule_restart(ran: Duration) {
+    if STOPPING.load(Ordering::SeqCst) {
+        return;
+    }
+    let (mut attempt, mut wait) = crate::pure::core_restart(RESTARTS.load(Ordering::SeqCst), ran.as_secs());
+    RESTARTS.store(attempt, Ordering::SeqCst);
+    std::thread::spawn(move || loop {
+        log::line(format!("gnosis: core ended; restart {attempt} in {wait} s"));
+        std::thread::sleep(Duration::from_secs(wait));
+        match start() {
+            Ok(()) => return,
+            Err(e) if STOPPING.load(Ordering::SeqCst) || e.contains("already running") => return,
+            Err(e) => {
+                log::line(format!("gnosis: core restart failed: {e}"));
+                (attempt, wait) = crate::pure::core_restart(attempt, 0);
+                RESTARTS.store(attempt, Ordering::SeqCst);
+            }
+        }
+    });
 }
 
 fn respond(resp: ResponseFromRoot) {
@@ -377,7 +417,11 @@ fn start_status_poller() {
                     }
                     last_conn = conn;
                 }
-                *STATUS.lock().unwrap() = Some(v);
+                // under the TO_CORE lock: a core that just stopped (and cleared STATUS) is not revived
+                let to_core = TO_CORE.lock().unwrap();
+                if to_core.is_some() {
+                    *STATUS.lock().unwrap() = Some(v);
+                }
             }
         });
     });
@@ -385,6 +429,7 @@ fn start_status_poller() {
 
 /// Tears the tunnel down on app exit (the core's own shutdown is best effort).
 pub fn shutdown() {
+    STOPPING.store(true, Ordering::SeqCst);
     if let Some(tx) = TO_CORE.lock().unwrap().take() {
         let _ = tx.try_send(WorkerToCore::Shutdown);
     }
