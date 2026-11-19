@@ -14,8 +14,8 @@ using static GnosisVpn.Ui.Kit;
 
 namespace GnosisVpn.Ui;
 
-/// <summary>The pages in the NavigationView: Home, Locations, Balance, Send funds directly, Settings,
-/// Live traffic. Everything they show about the VPN comes from the Gnosis VPN service.</summary>
+/// <summary>The pages in the NavigationView: Home, Locations, Balance, Send funds directly, Settings.
+/// Everything they show about the VPN comes from the Gnosis VPN service.</summary>
 public sealed class Pages
 {
     readonly MainWindow w;
@@ -51,7 +51,6 @@ public sealed class Pages
         "balance" => Balance(),
         "direct" => Direct(),
         "settings" => Settings(),
-        "traffic" => Traffic.Build(w),
         _ => Home(),
     };
 
@@ -505,7 +504,7 @@ public sealed class Pages
         p.Children.Add(Section("App"));
         p.Children.Add(Grp(
             Card("location", "Preferred exit", S.Mode == "auto" ? "Auto · best" : e.City, Btn("Change", () => Act("pick"))),
-            Card("monitoring", "Detailed metrics", "Ping, route quality, the exit table and live traffic.", Toggle(!S.Simple, () => Act("view"), "Detailed metrics")),
+            Card("monitoring", "Detailed metrics", "Ping, route quality and the exit table.", Toggle(!S.Simple, () => Act("view"), "Detailed metrics")),
             Card("person", "Exit icons", null, Combo(new[] { ("node", "Node icon"), ("flag", "Flags"), ("none", "None") }, S.Icons, v => Act("icons", v: v))),
             Card("public", "App theme", null, Combo(new[] { ("system", "Use system setting"), ("light", "Light"), ("dark", "Dark") }, w.U.Mode, v => { w.U.Mode = v; Prefs.Save("mode", v); w.Render(); }))));
         p.Children.Add(Section("About"));

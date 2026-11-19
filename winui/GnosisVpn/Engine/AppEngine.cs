@@ -101,7 +101,6 @@ public sealed class AppEngine
             case "settings": Go("settings"); break;
             case "back": Back(); break;
             case "icons": S.Icons = v ?? "node"; break;
-            case "traffic": Go("traffic"); break;
             case "details": S.Details = !S.Details; break;
             case "row": S.OpenRow = S.OpenRow == id ? null : id; break;
             case "dismiss": S.Flash = S.Fq.Count > 0 ? Shift(S.Fq) : null; break;

@@ -46,7 +46,7 @@ public static class Messages
             "connecting" => "S00b",
             "reconnecting" => "L1",
             "connected" => "S01",
-            _ => g.Page switch { "pick" => "S03s", "settings" => "S19n", "add" => "S18", "direct" => "I-1d", "traffic" => "T", _ => S.Mode == "manual" ? "F1" : "F2" },
+            _ => g.Page switch { "pick" => "S03s", "settings" => "S19n", "add" => "S18", "direct" => "I-1d", _ => S.Mode == "manual" ? "F1" : "F2" },
         };
     }
 }

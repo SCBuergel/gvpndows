@@ -109,7 +109,7 @@ public sealed partial class MainWindow : Window
         if (top == "pick") return "locations";
         if (top == "settings") return "settings";
         if (top == "add") return "balance";
-        return top;   // direct, traffic
+        return top;   // direct
     }
     public string BaseKey() => S.Fail != null ? "fail" : S.Gate ? "gate" : S.SyncT != null ? "sync" : "home";
     bool CanBack() => S.Stack.Count > 0;
@@ -145,7 +145,6 @@ public sealed partial class MainWindow : Window
         }
         Nav.MenuItems.Add(Item("home", "home", "Home"));
         Nav.MenuItems.Add(Item("locations", "location", "Locations"));
-        Nav.MenuItems.Add(Item("traffic", "public", "Live traffic"));
         Nav.MenuItems.Add(Item("balance", "account_balance_wallet", "Balance"));
         Nav.FooterMenuItems.Add(Item("settings", "settings", "Settings"));
     }
@@ -153,7 +152,6 @@ public sealed partial class MainWindow : Window
     void UpdateNav()
     {
         var r = Route();
-        navItems["traffic"].Visibility = S.Simple ? Visibility.Collapsed : Visibility.Visible;
         foreach (var (k, it) in navItems)
         {
             bool on = r == k || (k == "balance" && r == "direct");
@@ -164,7 +162,7 @@ public sealed partial class MainWindow : Window
                 _ => null,
             };
             it.InfoBadge = badge == null ? null : new InfoBadge { Background = Theme.Br(badge), Width = 8, Height = 8, MinWidth = 8, Padding = new Thickness(0) };
-            it.Icon = Icons.PathIcon(it.Tag is "home" ? "home" : k == "locations" ? "location" : k == "traffic" ? "public" : k == "balance" ? "account_balance_wallet" : "settings", on);
+            it.Icon = Icons.PathIcon(it.Tag is "home" ? "home" : k == "locations" ? "location" : k == "balance" ? "account_balance_wallet" : "settings", on);
         }
     }
 
