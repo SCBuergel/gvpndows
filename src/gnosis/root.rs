@@ -156,6 +156,8 @@ pub struct Root {
     bypass_peers: BTreeSet<Ipv4Addr>,
     /// When the core last listed each peer IP (ms, see `now_ms`); unlisted for 300 s, its route goes.
     peer_seen: std::collections::BTreeMap<Ipv4Addr, u64>,
+    /// The peers of the last SetupTunnel: kept for the connection, as upstream's static routes.
+    setup_peers: Vec<Ipv4Addr>,
     /// Recorded bypass routes of an earlier run that could not be removed at start: ours.
     stale_bypass: Vec<net::Route>,
     tunnel_routes: Vec<net::Route>,
@@ -262,11 +264,11 @@ impl Root {
         self.bypass_peers.clear();
     }
 
-    /// Brings the peer bypass routes in line with the core's `listed` peer IPs (plus Blokli and the
-    /// debug relay, always kept): adds the missing ones and removes those of IPs unlisted for 300 s,
-    /// then the LAN ranges; returns how many peer routes were added.
+    /// Brings the peer bypass routes in line with the core's `listed` peer IPs (plus Blokli, the
+    /// debug relay and the SetupTunnel peers, always kept): adds the missing ones and removes those
+    /// of IPs unlisted for 300 s, then the LAN ranges; returns how many peer routes were added.
     fn add_bypass_peers(&mut self, listed: &[Ipv4Addr], wan: (u64, IpAddr)) -> usize {
-        let always: Vec<Ipv4Addr> = self.blokli_ip.into_iter().chain(self.service_ips.iter().copied()).collect();
+        let always: Vec<Ipv4Addr> = self.blokli_ip.into_iter().chain(self.service_ips.iter().copied()).chain(self.setup_peers.iter().copied()).collect();
         let (add, gone) = crate::pure::reconcile_peers(&mut self.peer_seen, listed, &always, &self.bypass_peers, now_ms());
         if !gone.is_empty() {
             self.remove_peer_bypass(&gone);
@@ -300,13 +302,15 @@ impl Root {
                 keep.push(r);
             } else {
                 self.bypass_peers.remove(&d);
+                self.stale_bypass.retain(|s| rec(s) != rec(&r));
             }
         }
         self.bypass = keep;
         let mut ours = self.bypass.clone();
         ours.extend(self.stale_bypass.iter().cloned());
         record_bypass(&ours, false);
-        log::line(format!("bypass: removed the routes of {} peers no longer listed", ips.len()));
+        let left = ips.iter().filter(|ip| self.bypass_peers.contains(ip)).count();
+        log::line(format!("bypass: removed the routes of {} peers no longer listed ({left} kept for a retry)", ips.len() - left));
     }
 
     /// Adds a bypass route; true when it is in place and ours (an Err or another's route: false).
@@ -343,6 +347,7 @@ impl Root {
             let hosts = crate::relay::bypass_hosts();
             self.service_ips = hosts.iter().flat_map(|h| resolve_v4(h)).collect();
         }
+        self.setup_peers = peer_ips.to_vec();
         self.add_bypass_peers(peer_ips, wan);
 
         // 2. Address, MTU, metric.
@@ -418,6 +423,7 @@ impl Root {
         }
         self.remove_bypass();
         self.peer_seen.clear();
+        self.setup_peers.clear();
         log::line("tunnel routes removed");
     }
 
