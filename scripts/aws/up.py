@@ -1,10 +1,11 @@
 """Create one Windows Server test instance in eu-north-1, reachable by SSH (key auth) from this
 machine's public IP only. Usage: up.py RUN_DIR [hours_on_machine_deadline]
 Writes RUN_DIR/state.json as soon as each resource exists, so down.py can always clean up.
-Safeguard on the machine itself: it shuts down after N hours and shutdown = terminate."""
+Safeguard on the machine itself: it shuts down N hours from now (UTC, also after reboots), and shutdown = terminate."""
 import json, os, subprocess, sys, time, urllib.request
 sys.path.insert(0, os.path.dirname(__file__))
 from awscommon import session, TAG
+from userdata import userdata as make_userdata
 
 run_dir = sys.argv[1]; hours = float(sys.argv[2]) if len(sys.argv) > 2 else 6
 itype = os.environ.get("ITYPE", "t3.large"); image_pat = os.environ.get("IMAGE", "Windows_Server-2025-English-Full-Base-*")
@@ -30,19 +31,7 @@ ec2.authorize_security_group_ingress(GroupId=sg, IpPermissions=[{"IpProtocol": "
         "IpRanges": [{"CidrIp": f"{my_ip}/32", "Description": "this machine"}]}])
 img = sorted(ec2.describe_images(Owners=["amazon"], Filters=[{"Name": "name", "Values": [image_pat]}])["Images"],
         key=lambda i: i["CreationDate"])[-1]
-secs = int(hours * 3600)
-userdata = f"""<powershell>
-shutdown /s /t {secs} /c "gvpndows-test deadline"
-$ErrorActionPreference = 'Continue'
-if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) {{ Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 }}
-Set-Content -Path C:\\ProgramData\\ssh\\administrators_authorized_keys -Value '{pub}' -Encoding ascii -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force C:\\ProgramData\\ssh | Out-Null
-Set-Content -Path C:\\ProgramData\\ssh\\administrators_authorized_keys -Value '{pub}' -Encoding ascii
-icacls C:\\ProgramData\\ssh\\administrators_authorized_keys /inheritance:r /grant "*S-1-5-32-544:F" /grant "SYSTEM:F"
-New-ItemProperty -Path HKLM:\\SOFTWARE\\OpenSSH -Name DefaultShell -Value C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -PropertyType String -Force
-Set-Service sshd -StartupType Automatic; Start-Service sshd
-New-NetFirewallRule -Name sshd-gvpndows -DisplayName 'OpenSSH (gvpndows)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 -ErrorAction SilentlyContinue
-</powershell>"""
+userdata, state["deadline"] = make_userdata(pub, time.time(), hours); save()
 r = ec2.run_instances(ImageId=img["ImageId"], InstanceType=itype, MinCount=1, MaxCount=1,
         SecurityGroupIds=[sg], UserData=userdata, InstanceInitiatedShutdownBehavior="terminate",
         MetadataOptions={"HttpTokens": "required"},

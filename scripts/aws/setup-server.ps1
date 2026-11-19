@@ -27,4 +27,6 @@ foreach ($ch in "8.0", "10.0") { & C:\gv\dotnet-install.ps1 -Channel $ch -Instal
 [Environment]::SetEnvironmentVariable("DOTNET_ROOT", "C:\dotnet", "Machine")
 $mp = [Environment]::GetEnvironmentVariable("Path", "Machine"); if ($mp -notmatch "C:\\dotnet") { [Environment]::SetEnvironmentVariable("Path", $mp + ";C:\dotnet", "Machine") }
 "SDKs: " + ((C:\dotnet\dotnet.exe --list-sdks) -join ", ")
+# the up.py deadline task re-arms the deadline at boot, so the first-boot timer can go (a pending one can block the reboot)
+if (Get-ScheduledTask gvpndows-deadline -ErrorAction SilentlyContinue) { shutdown /a 2>$null; "deadline: boot task armed, timer cancelled for the reboot" }
 "SETUP-DONE"
