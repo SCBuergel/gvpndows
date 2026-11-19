@@ -19,14 +19,15 @@ Stop-GnosisService 30
 $oldBin = Get-ServiceBinPath
 Step "Installing the service in $SvcDir (changeable by administrators only)"
 New-Item -ItemType Directory -Force $SvcDir | Out-Null
-icacls $SvcDir /setowner "*S-1-5-32-544" /T /C /Q | Out-Null
-icacls $SvcDir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX" /C /Q | Out-Null
+Invoke-Icacls $SvcDir /setowner "*S-1-5-32-544" /T /C /Q
+Invoke-Icacls $SvcDir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX" /C /Q
 Copy-Item (Join-Path $here "service\gvpndows.exe") $SvcExe -Force
 Copy-Item (Join-Path $here "service\gnosis") $SvcDir -Recurse -Force
-icacls "$SvcDir\*" /reset /T /C /Q | Out-Null
+Invoke-Icacls "$SvcDir\*" /reset /T /C /Q
+# again after the copy, so the new files are covered too
+Invoke-Icacls $SvcDir /setowner "*S-1-5-32-544" /T /C /Q
 if ((Get-FileHash (Join-Path $here "service\gvpndows.exe")).Hash -ne (Get-FileHash $SvcExe).Hash) { throw "$SvcExe is not the new build" }
-$weak = icacls $SvcDir /T | Select-String "(Users|Authenticated Users|Everyone|INTERACTIVE):\(.*(F|M|W)\)"
-if ($weak) { throw "$SvcDir is writable by non-admins: $weak" }
+Assert-AdminOnly $SvcDir
 $bin = '"' + $SvcExe + '" --service'
 if (-not (Get-Service GnosisVPN -ErrorAction SilentlyContinue)) {
   New-Service -Name GnosisVPN -BinaryPathName $bin -DisplayName "Gnosis VPN" -StartupType Automatic -Description "Runs the Gnosis VPN client core and the tunnel for the Gnosis VPN app. It never connects by itself." | Out-Null

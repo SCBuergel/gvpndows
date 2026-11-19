@@ -25,6 +25,26 @@ function Remove-LegacyDir([string]$oldBinPath) {
   cmd.exe /c rmdir /s /q "$($script:LegacyDir)" 2>$null
   Done $(if (Test-Path -LiteralPath $script:LegacyDir) { "some files are still in use; delete it after a restart" } else { "" })
 }
+# Native icacls never throws (Windows PowerShell 5.1); a failed ACL step must stop the install.
+function Invoke-Icacls { icacls @args | Out-Null; if ($LASTEXITCODE) { throw "icacls $args failed (exit $LASTEXITCODE)" } }
+# The service folder and everything in it must be owned and changeable only by SYSTEM,
+# Administrators and TrustedInstaller. By SID, not icacls text (names are localized).
+$script:AdminSids = @("S-1-5-18", "S-1-5-32-544", "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464")
+# WriteData/AddFile, AppendData/AddSubdirectory, WriteEA, DeleteChild, WriteAttributes, Delete,
+# WRITE_DAC, WRITE_OWNER, GENERIC_ALL, GENERIC_WRITE
+$script:WriteMask = 0x2 -bor 0x4 -bor 0x10 -bor 0x40 -bor 0x100 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000
+function Assert-AdminOnly([string]$dir) {
+  foreach ($p in @($dir) + @(Get-ChildItem -LiteralPath $dir -Recurse -Force | ForEach-Object { $_.FullName })) {
+    $acl = Get-Acl -LiteralPath $p
+    $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    if ($owner -notin $script:AdminSids) { throw "$p is owned by $owner, not by Administrators or SYSTEM" }
+    foreach ($a in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+      if ($a.AccessControlType -eq "Allow" -and $a.IdentityReference.Value -notin $script:AdminSids -and ([int]$a.FileSystemRights -band $script:WriteMask)) {
+        throw "$p is writable by non-admins: $($a.IdentityReference.Value) has $($a.FileSystemRights)"
+      }
+    }
+  }
+}
 function Get-ServiceProcess { Get-Process gvpndows -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $script:SvcExe -or $_.Path -eq (Join-Path $script:LegacyDir "gvpndows.exe") } }
 
 # A click into a console window starts a QuickEdit selection, which pauses the script until Enter
