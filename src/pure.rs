@@ -7,7 +7,7 @@ use std::net::Ipv4Addr;
 pub const MAX_REQUEST: usize = 64 * 1024;
 
 /// Core commands the app may send over the pipe. Funding commands (`funding_tool` takes a secret,
-/// `fund_pix_float` moves funds) and the probing controls are not reachable from the pipe.
+/// `fund_pix_pool` moves funds) and the probing controls are not reachable from the pipe.
 pub const ALLOWED_COMMANDS: [&str; 6] = ["status", "connect", "disconnect", "balance", "destinations", "nerd_stats"];
 
 #[derive(Debug, PartialEq)]
@@ -202,6 +202,7 @@ mod tests {
     #[test]
     fn pipe_rejects_funding_unknown_and_malformed() {
         assert!(matches!(route_request(r#"{"type":"funding_tool","secret":"x"}"#), PipeRoute::Rejected(_)));
+        assert!(matches!(route_request(r#"{"type":"fund_pix_pool","amount":"1"}"#), PipeRoute::Rejected(_)));
         assert!(matches!(route_request(r#"{"type":"fund_pix_float","amount":"1"}"#), PipeRoute::Rejected(_)));
         assert!(matches!(route_request(r#"{"type":"probe","destination":"a"}"#), PipeRoute::Rejected(_)));
         assert!(matches!(route_request("not json"), PipeRoute::Rejected(_)));

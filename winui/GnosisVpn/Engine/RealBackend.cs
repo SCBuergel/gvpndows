@@ -144,7 +144,8 @@ public sealed class RealBackend
     /// "Send log to developer" button.</summary>
     public bool DebugRelay { get; private set; }
     public string? LastError => link.LastError;
-    /// <summary>MB per wxHOPR, from the exit's PIX chunk price once known (660 MB for 5.94 wxHOPR on prod).</summary>
+    /// <summary>MB per wxHOPR: the status's pix_price_per_byte, else the exit's chunk price once known
+    /// (660 MB for 5.94 wxHOPR on prod).</summary>
     double mbPerWx = 660.160512 / 5.941444608;
 
     static readonly Dictionary<string, string> COUNTRY = new()
@@ -237,6 +238,9 @@ public sealed class RealBackend
         DebugRelay = st["debug_relay"]?.GetValue<bool>() == true;
         var data = st["status"]?["data"];
         var mode = data?["run_mode"]?["type"]?.ToString();
+        // the PIX price from the config (client 1.1+), so the balance reads as data before any session
+        var price = Wei(data?["pix_price_per_byte"]);
+        if (price > 0) mbPerWx = 1e-6 / price;
         if (mode != lastMode) { App.Log($"backend: run mode {lastMode ?? "-"} -> {mode ?? "-"}"); lastMode = mode; }
         switch (mode)
         {

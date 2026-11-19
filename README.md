@@ -5,9 +5,9 @@ Gnosis VPN for Windows, built step by step (same approach as the Android app in 
 1. **Pipeline:** a stub app cross-compiled from Linux and run on a real Windows laptop.
 2. **A real tunnel without HOPR:** Wintun + WireGuard (neptun) to a plain WireGuard server.
 3. **The Gnosis VPN client core** over a 1-hop HOPR path on prod. Built against gnosis_vpn-client
-   `main` (7d745df7, version 1.0.1; set `CLIENT_REF` in `scripts/do-build/*.sh`), patched for Windows
-   (`rust/patches`, `rust/crate-patches`). `rust/patches/0002` lifts `hopr-strategy` to ~9.2 for its
-   Curvy/PIX payment fixes; `BUMP=1` on a build moves the HOPR dependencies to their newest versions.
+   `main` (8a0e3be6, version 1.1.1; set `CLIENT_REF` in `scripts/do-build/*.sh`), patched for Windows
+   (`rust/patches`, `rust/crate-patches`). The client itself now requires `hopr-strategy` ~9.2 (its
+   Curvy/PIX payment fixes); `BUMP=1` on a build moves the HOPR dependencies to their newest versions.
 4. **Current: the Windows app.** A native WinUI 3 app (`winui/`) from the `~/mobile-UI` prototype,
    in front of a Windows service that runs the core and the tunnel.
 

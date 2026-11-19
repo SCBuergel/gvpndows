@@ -16,7 +16,7 @@ step rustup
 cargo install --locked cargo-xwin >/dev/null 2>&1
 # The Gnosis VPN client (main, see CLIENT_REF); its rust-toolchain.toml picks the compiler.
 git clone -q https://github.com/gnosis/gnosis_vpn-client.git /root/client
-cd /root/client && git fetch -q origin main; git checkout -q "${CLIENT_REF:-7d745df7d6e471ca74152652316bdf7d608e1f36}" && git log --oneline -1
+cd /root/client && git fetch -q origin main; git checkout -q "${CLIENT_REF:-8a0e3be6cddedcb21b23f82327ccf99ab40e327c}" && git log --oneline -1
 rustup show active-toolchain >/dev/null 2>&1 || rustup toolchain install "$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)" --profile minimal
 rustup target add x86_64-pc-windows-msvc >/dev/null
 rustc --version

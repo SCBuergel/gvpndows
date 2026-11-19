@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs ON the droplet. Builds inside a gnosis_vpn-client checkout (CLIENT_REF, default: main at 7d745df7, version 1.0.1) (/root/client) with our
+# Runs ON the droplet. Builds inside a gnosis_vpn-client checkout (CLIENT_REF, default: main at 8a0e3be6, version 1.1.1) (/root/client) with our
 # Windows patch applied and this app added as the workspace member gnosis_vpn-windows, so the app
 # links the client core against the client's own pinned Cargo.lock.
 # MODE=check      only `cargo check` the app (and with it the patched core) for Windows: fast errors
@@ -16,7 +16,7 @@ export AWS_LC_SYS_PREBUILT_NASM=1
 
 # --- workspace: pristine client + patch + our crate ---
 cd /root/client
-CLIENT_REF=${CLIENT_REF:-7d745df7d6e471ca74152652316bdf7d608e1f36}
+CLIENT_REF=${CLIENT_REF:-8a0e3be6cddedcb21b23f82327ccf99ab40e327c}
 git cat-file -e "$CLIENT_REF^{commit}" 2>/dev/null || git fetch -q origin main
 git checkout -q -f "$CLIENT_REF" && git clean -qfdx -e target && echo "client $(git log --oneline -1)"
 for p in /root/src/rust/patches/*.patch; do git apply "$p"; echo "applied $(basename "$p")"; done
@@ -39,7 +39,7 @@ cp /root/src/.cargo/config.toml .cargo/config.toml
 LOCKED=--locked
 if [ -f /root/src/rust/Cargo.lock ]; then cp /root/src/rust/Cargo.lock Cargo.lock; else LOCKED=; fi
 # BUMP=1: move the HOPR dependencies to their newest compatible versions (hopr-strategy to the
-# version 0002-hopr-strategy-9.2.patch asks for, hoprnet master and edgli main to their branch
+# newest ~9.2 the client asks for, hoprnet master and edgli main to their branch
 # heads), build without --locked, and return the new lock in /root/out (copy it to rust/Cargo.lock).
 if [ "${BUMP:-0}" = 1 ]; then
     cargo update -p hopr-strategy 2>&1 | grep -E "Updating|Adding|Removing|Locking" | grep -iE "hopr|curvy|edgli" || true
