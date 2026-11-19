@@ -83,7 +83,7 @@ Rust builds happen on a throwaway DigitalOcean droplet, not on this machine:
 ## On Windows
 
 - The .exe files are unsigned: SmartScreen shows "Windows protected your PC" → *More info* → *Run anyway*.
-- Logs: the service in `%ProgramData%\gvpndows\gvpndows.log`, the app in `%LOCALAPPDATA%\GnosisVPN\ui.log`.
+- Logs: the service in `%ProgramData%\gvpndows\gvpndows.log` (past 20 MB it moves to `gvpndows.old.log`), the app in `%LOCALAPPDATA%\GnosisVPN\ui.log`.
 - The older egui app (`gvpndows.exe` without `--service`) logs to `%LOCALAPPDATA%\gvpndows\gvpndows.log`.
 
 ## Production release

@@ -1,5 +1,5 @@
 //! Platform-independent logic split out of the Windows code so it can be unit-tested anywhere:
-//! pipe request routing, the HOPR leak check on tunnel packets, the tunnel routes to add, the WAN, log chunking, e2e plan steps.
+//! pipe request routing, the HOPR leak check on tunnel packets, the tunnel routes to add, the WAN, log chunking and rotation, e2e plan steps.
 
 use std::net::Ipv4Addr;
 
@@ -111,6 +111,14 @@ pub fn chunk_log(text: &str, chunk: usize) -> Vec<String> {
         parts.push(cur);
     }
     parts
+}
+
+/// Size at which the log file moves to gvpndows.old.log and a new one starts (at most ~2x on disk).
+pub const LOG_FILE_MAX: u64 = 20 * 1024 * 1024;
+
+/// Whether a log file of `bytes` is full and is rotated before the next line.
+pub fn log_full(bytes: u64) -> bool {
+    bytes >= LOG_FILE_MAX
 }
 
 /// The end of a log, at most `max` bytes, starting at a line start (the newest lines matter most).
