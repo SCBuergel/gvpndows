@@ -411,7 +411,8 @@ impl Root {
         }
     }
 
-    /// Removes the routes (the core disconnected); the adapter stays for the next connect.
+    /// Removes the routes, the tunnel address and its DNS servers (the core disconnected); the
+    /// adapter stays for the next connect.
     pub fn teardown_routes(&mut self) {
         if self.dns_guard.take().is_some() {
             log::line("DNS guard off");
@@ -419,6 +420,18 @@ impl Root {
         for r in self.tunnel_routes.drain(..).rev() {
             if let Err(e) = net::delete_route(&r) {
                 log::line(format!("teardown: {e}"));
+            }
+        }
+        // The kept adapter must not keep the tunnel's address (and its on-link route) or its DNS
+        // servers, or Windows keeps preferring them; setup_tunnel adds both again.
+        if let Some(a) = self.adapter.as_mut() {
+            if let Some((ip, len)) = a.address.take() {
+                if let Err(e) = net::delete_address(a.luid, ip, len) {
+                    log::line(format!("teardown: {e}"));
+                }
+            }
+            if let Err(e) = a._adapter.set_dns_servers(&[]) {
+                log::line(format!("teardown: clearing the tunnel DNS servers: {e}"));
             }
         }
         self.remove_bypass();
