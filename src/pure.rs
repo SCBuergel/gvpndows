@@ -175,6 +175,55 @@ pub fn parse_step(step: &str) -> (&str, u64) {
     }
 }
 
+/// The server end of the service's named pipe, as `serve_pipe_loop` drives it (Win32 in service.rs).
+pub trait PipeServer {
+    type H;
+    /// A new listening instance; `first` requires the name to be new (FILE_FLAG_FIRST_PIPE_INSTANCE).
+    fn create(&mut self, first: bool) -> Result<Self::H, String>;
+    /// Waits for a client on the instance; false if that failed (e.g. the client already left).
+    fn connect(&mut self, h: &Self::H) -> bool;
+    /// Drops the instance's client; the instance stays and listens again.
+    fn disconnect(&mut self, h: &Self::H);
+    /// Takes one of the limited client slots; false when all are taken.
+    fn admit(&mut self) -> bool;
+    /// Gives back a slot from `admit` whose client is not served.
+    fn release(&mut self);
+    /// Serves the connected instance on its own thread, which closes it and releases its slot.
+    fn serve(&mut self, h: Self::H);
+    fn log(&mut self, msg: String);
+    /// Waits before the next try after a failed create.
+    fn pause(&mut self);
+    /// False ends the loop (tests only; the service serves for its lifetime).
+    fn running(&mut self) -> bool {
+        true
+    }
+}
+
+/// Serves the pipe so that, from the first instance on, an instance of the service's own always
+/// exists: the next one is created before the connected one is handed to its client, and a failed
+/// connection reuses its instance. Otherwise another process could recreate the name with its own DACL.
+pub fn serve_pipe_loop<P: PipeServer>(p: &mut P) {
+    let mut h = match p.create(true) {
+        Ok(h) => h,
+        Err(e) => return p.log(format!("service: the pipe exists already or cannot be created ({e}); not serving it")),
+    };
+    while p.running() {
+        if !p.connect(&h) || !p.admit() {
+            p.disconnect(&h);
+            continue;
+        }
+        match p.create(false) {
+            Ok(next) => p.serve(std::mem::replace(&mut h, next)),
+            Err(e) => {
+                p.release();
+                p.disconnect(&h);
+                p.log(format!("service: CreateNamedPipe failed ({e}); dropped a client to keep listening (pipe name takeover attempt?)"));
+                p.pause();
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

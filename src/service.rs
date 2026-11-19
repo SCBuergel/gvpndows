@@ -335,46 +335,59 @@ fn serve_pipe() {
         return;
     }
     let sa = SECURITY_ATTRIBUTES { nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: sd, bInheritHandle: 0 };
-    let name = wide(PIPE);
     log::line(format!("service: listening on {PIPE}"));
-    let mut first = true;
-    loop {
-        // The first instance must be ours (FILE_FLAG_FIRST_PIPE_INSTANCE): if another process already
-        // created the name, the service stops serving rather than share it. Remote clients are refused.
+    // The first instance must be ours (FILE_FLAG_FIRST_PIPE_INSTANCE); serve_pipe_loop keeps one of
+    // ours in existence from then on. Remote clients are refused.
+    crate::pure::serve_pipe_loop(&mut Win32Pipe { name: wide(PIPE), sa });
+    unsafe { LocalFree(sd as _) };
+}
+
+struct Win32Pipe {
+    name: Vec<u16>,
+    sa: SECURITY_ATTRIBUTES,
+}
+impl crate::pure::PipeServer for Win32Pipe {
+    type H = HANDLE;
+    fn create(&mut self, first: bool) -> Result<HANDLE, String> {
         let open = PIPE_ACCESS_DUPLEX | if first { FILE_FLAG_FIRST_PIPE_INSTANCE } else { 0 };
-        let h = unsafe {
-            CreateNamedPipeW(name.as_ptr(), open, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, PIPE_UNLIMITED_INSTANCES, 65536, 65536, 0, &sa)
-        };
+        let mode = PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS;
+        let h = unsafe { CreateNamedPipeW(self.name.as_ptr(), open, mode, PIPE_UNLIMITED_INSTANCES, 65536, 65536, 0, &self.sa) };
         if h == INVALID_HANDLE_VALUE {
-            let e = std::io::Error::last_os_error();
-            if first {
-                log::line(format!("service: {PIPE} exists already or cannot be created ({e}); not serving it"));
-                unsafe { LocalFree(sd as _) };
-                return;
-            }
-            log::line(format!("service: CreateNamedPipe failed: {e}"));
-            std::thread::sleep(std::time::Duration::from_secs(2));
-            continue;
+            return Err(std::io::Error::last_os_error().to_string());
         }
-        first = false;
-        let ok = unsafe { ConnectNamedPipe(h, null_mut()) } != 0 || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
-        if !ok {
-            unsafe { CloseHandle(h) };
-            continue;
-        }
-        // Every interactive user may connect; a bounded number of connections keeps one from
-        // making the SYSTEM service spawn threads without limit (the app needs two or three; the
-        // limit is generous because idle connections hold their slot).
+        Ok(h)
+    }
+    fn connect(&mut self, h: &HANDLE) -> bool {
+        unsafe { ConnectNamedPipe(*h, null_mut()) != 0 || GetLastError() == ERROR_PIPE_CONNECTED }
+    }
+    fn disconnect(&mut self, h: &HANDLE) {
+        unsafe { DisconnectNamedPipe(*h) };
+    }
+    // Every interactive user may connect; a bounded number of connections keeps one from
+    // making the SYSTEM service spawn threads without limit (the app needs two or three; the
+    // limit is generous because idle connections hold their slot).
+    fn admit(&mut self) -> bool {
         if PIPE_CLIENTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= MAX_PIPE_CLIENTS {
-            PIPE_CLIENTS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-            unsafe { CloseHandle(h) };
-            continue;
+            self.release();
+            return false;
         }
+        true
+    }
+    fn release(&mut self) {
+        PIPE_CLIENTS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+    fn serve(&mut self, h: HANDLE) {
         let conn = PipeConn(h);
         std::thread::spawn(move || {
             client(conn);
             PIPE_CLIENTS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
         });
+    }
+    fn log(&mut self, msg: String) {
+        log::line(msg);
+    }
+    fn pause(&mut self) {
+        std::thread::sleep(std::time::Duration::from_secs(2));
     }
 }
 

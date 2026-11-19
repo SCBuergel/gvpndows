@@ -24,7 +24,8 @@ Gnosis VPN for Windows, built step by step (same approach as the Android app in 
     `disconnect`, `balance`, `destinations` and `nerd_stats`. Funding and probing commands are refused
     (`src/pure.rs`).
   - Pipe security: only interactive users may connect, and remote clients are refused. The first pipe
-    instance must be the service's own.
+    instance must be the service's own, and one of its own always listens, so no other process can
+    take over the name.
   - State: `%ProgramData%\GnosisVPN` and `%ProgramData%\gvpndows`. Both are owned by SYSTEM and readable
     by SYSTEM and Administrators only, because they hold the node key. If they can't be secured, the
     service doesn't start.
