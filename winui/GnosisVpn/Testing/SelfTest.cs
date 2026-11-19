@@ -133,9 +133,19 @@ public static class SelfTest
         var toGer = State("{\"type\":\"running\"}"); toGer["status"]!["data"]!["target"] = GER;
         rb.ApplyForTest(toGer, null);
         Check(g.S.Conn == "connecting" && g.S.Loc == GER, "switching: the new exit's probe shows connecting");
+        // the core keeps the target but latched the exit unrecoverable (it refused the session)
+        JsonNode GerDead() { var n = State("{\"type\":\"running\"}"); n["status"]!["data"]!["target"] = GER;
+            n["status"]!["data"]!["destinations"]![0]!["route_health"]!["state"] = JsonNode.Parse("{\"type\":\"unrecoverable\",\"reason\":{\"type\":\"cannot_open_session\",\"error\":\"x\"}}"); return n; }
         g.S.Flash = null; g.S.Fq = new();
-        rb.ApplyForTest(State("{\"type\":\"running\"}"), null);
-        Check(g.S.Conn == "idle" && g.S.Flash?.Lead == "Couldn’t connect to GVPN-GER-1.", "switching: the new exit's failure is reported");
+        rb.ApplyForTest(GerDead(), null);
+        Check(g.S.Conn == "idle" && g.S.Flash?.Lead == "Couldn’t connect to GVPN-GER-1." && g.S.Flash?.Text == "The exit refused the session: x", "switching: the new exit's failure is reported");
+        // the same from idle
+        g.S.Flash = null; g.S.Fq = new();
+        rb.Handle("pick2", GER);
+        rb.ApplyForTest(toGer, null);
+        Check(g.S.Conn == "connecting" && g.S.Flash == null, "connect from idle: the probe shows connecting");
+        rb.ApplyForTest(GerDead(), null);
+        Check(g.S.Conn == "idle" && g.S.Flash?.Lead == "Couldn’t connect to GVPN-GER-1.", "connect from idle: an unrecoverable exit is reported");
         g.S.Flash = null; g.S.Fq = new();
 
         // ---- connect replies and connects to no known exit

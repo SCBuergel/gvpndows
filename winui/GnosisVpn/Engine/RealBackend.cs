@@ -335,7 +335,10 @@ public sealed class RealBackend
         // while switching, or the 3 s old cached status) is not shown.
         var target = data?["target"]?.ToString();
         if (attemptDest != null && (target == attemptDest || curId == attemptDest && kind is "connecting" or "reconnecting")) attemptSeen = true;
-        bool headed = attemptDest != null && (target == attemptDest || pendingConnect != null && !attemptSeen);
+        // The core keeps the target after the exit's route turned unrecoverable (it refused the session)
+        // but no longer tries it: that ends the attempt.
+        bool dead = attemptDest != null && health.GetValueOrDefault(attemptDest)?["state"]?["type"]?.ToString() == "unrecoverable";
+        bool headed = attemptDest != null && !dead && (target == attemptDest || pendingConnect != null && !attemptSeen);
         if (headed && curId != attemptDest)
         {
             if (S.Conn != "connecting") { S.CStart = AppEngine.Now; S.CDur = 90000; }
