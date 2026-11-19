@@ -4,6 +4,7 @@ $ErrorActionPreference = "Continue"
 . (Join-Path $PSScriptRoot "common.ps1")
 Write-Host "Removing Gnosis VPN`n"
 
+$oldBin = Get-ServiceBinPath
 Stop-App
 Stop-GnosisService 30
 
@@ -19,8 +20,9 @@ Remove-Item (Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\G
 Done
 
 Step "Removing the service files ($SvcDir)"
-foreach ($d in $SvcDir, $LegacyDir) { Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue }
-Done $(if ((Test-Path $SvcDir) -or (Test-Path $LegacyDir)) { "some files are still in use; they go after a restart" } else { "" })
+if (Test-Path -LiteralPath $SvcDir) { cmd.exe /c rmdir /s /q "$SvcDir" 2>$null }
+Done $(if (Test-Path -LiteralPath $SvcDir) { "some files are still in use; they go after a restart" } else { "" })
+Remove-LegacyDir $oldBin
 
 Write-Host ("`nGnosis VPN removed in {0:0} s." -f ((Get-Date) - $script:t0).TotalSeconds)
 Write-Host "The node identity and its funds stay in C:\ProgramData\GnosisVPN (delete it only if its funds are gone)."

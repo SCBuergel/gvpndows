@@ -16,6 +16,7 @@ Done
 Stop-App
 Stop-GnosisService 30
 
+$oldBin = Get-ServiceBinPath
 Step "Installing the service in $SvcDir (changeable by administrators only)"
 New-Item -ItemType Directory -Force $SvcDir | Out-Null
 icacls $SvcDir /setowner "*S-1-5-32-544" /T /C /Q | Out-Null
@@ -37,11 +38,7 @@ sc.exe config GnosisVPN start= delayed-auto | Out-Null
 sc.exe failure GnosisVPN reset= 86400 actions= restart/5000/restart/30000/restart/60000 | Out-Null
 Done ("build " + (Get-FileHash $SvcExe).Hash.Substring(0, 16))
 
-if (Test-Path $LegacyDir) {
-  Step "Removing the old service folder $LegacyDir"
-  Remove-Item $LegacyDir -Recurse -Force -ErrorAction SilentlyContinue
-  Done $(if (Test-Path $LegacyDir) { "some files are still in use; delete it after a restart" } else { "" })
-}
+Remove-LegacyDir $oldBin
 
 Step "Installing the app in $app, with a Start menu entry"
 if (Test-Path $app) { Remove-Item $app -Recurse -Force }

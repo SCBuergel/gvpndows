@@ -31,7 +31,7 @@ Gnosis VPN for Windows, built step by step (same approach as the Android app in 
   - The service never connects on its own. It starts the core at once and retries every 10 s until
     the network allows it (Blokli must be reachable).
   - Start type: `dist/windows/install.ps1` (the user install) makes it start with Windows (delayed)
-    and restart after a crash; `scripts/aws/service-install.ps1` (the test server) keeps it on demand.
+    and restart after a crash.
   - `--serve` runs the same in an elevated console. The app then needs `GNOSISVPN_TRUST_PIPE=1`,
     because it otherwise trusts only the pipe served by the GnosisVPN service.
 - **App** (`winui/GnosisVpn`, C# / .NET 10 / Windows App SDK 1.8):

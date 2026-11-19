@@ -5,8 +5,26 @@ $script:t0 = Get-Date
 # a standard user made first (C:\ is open to them) could keep a handle that survives an ACL reset.
 $script:SvcDir = Join-Path $env:ProgramFiles "Gnosis VPN Service"
 $script:SvcExe = Join-Path $script:SvcDir "gvpndows.exe"
-# Builds before 0.2.1 installed the service in C:\GnosisVPN; an update removes it.
+# Builds before 0.2.1 installed the service in C:\GnosisVPN; an update removes it (Remove-LegacyDir).
 $script:LegacyDir = "C:\GnosisVPN"
+# The old folder is removed only if the installed service ran from it and it is still the folder
+# the old installer made: not a link and owned by Administrators or SYSTEM. A folder a standard user
+# made (C:\ is open to them) may hold junctions; rmdir /s /q never follows them (Windows
+# PowerShell's Remove-Item -Recurse can, and would delete their targets as administrator).
+function Get-ServiceBinPath { try { (Get-CimInstance Win32_Service -Filter "Name='GnosisVPN'" -ErrorAction Stop).PathName } catch { "" } }
+function Remove-LegacyDir([string]$oldBinPath) {
+  if (-not (Test-Path -LiteralPath $script:LegacyDir)) { return }
+  if (-not ("$oldBinPath" -like "*$($script:LegacyDir)\gvpndows.exe*")) { Write-Host "           ($($script:LegacyDir) is not from Gnosis VPN; left alone)"; return }
+  $item = Get-Item -LiteralPath $script:LegacyDir -Force
+  # by SID: account names are localized (e.g. VORDEFINIERT\Administratoren)
+  $owner = (Get-Acl -LiteralPath $script:LegacyDir).GetOwner([Security.Principal.SecurityIdentifier]).Value
+  if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or ($owner -notin @("S-1-5-32-544", "S-1-5-18"))) {
+    Write-Host "           ($($script:LegacyDir) is a link or owned by $owner, not by the old installer; left alone)"; return
+  }
+  Step "Removing the old service folder $($script:LegacyDir)"
+  cmd.exe /c rmdir /s /q "$($script:LegacyDir)" 2>$null
+  Done $(if (Test-Path -LiteralPath $script:LegacyDir) { "some files are still in use; delete it after a restart" } else { "" })
+}
 function Get-ServiceProcess { Get-Process gvpndows -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $script:SvcExe -or $_.Path -eq (Join-Path $script:LegacyDir "gvpndows.exe") } }
 
 # A click into a console window starts a QuickEdit selection, which pauses the script until Enter
