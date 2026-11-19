@@ -335,6 +335,12 @@ pub fn backup_retry_secs(failures: u32) -> u64 {
     (30u64 << failures.saturating_sub(1).min(5)).min(600)
 }
 
+/// Whether a slot tagged with core run `slot` belongs to `run`: requests and replies of an older
+/// run (its threads may outlive it) must not reach the next run's tunnel or core.
+pub fn same_run(slot: Option<u64>, run: u64) -> bool {
+    slot == Some(run)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

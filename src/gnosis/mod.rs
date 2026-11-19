@@ -17,7 +17,7 @@ use gnosis_vpn_lib::worker_params::{AllowFlags, ConfigFileMode, SpawnParams};
 use gnosis_vpn_ipc::dirs::UserDirs;
 use std::net::{IpAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tokio::runtime::Runtime;
@@ -29,9 +29,12 @@ pub const BLOKLI_URL: &str = "https://blokli.piz-palu.gnosisvpn.io";
 pub const LOG_FILTER: &str = "warn,hopr_transport::path=off,gnosis_vpn_lib::core=info,gnosis_vpn_lib::connection=info,\
 gnosis_vpn_lib::hopr=info,hopr_strategy::pix=info,hopr_lib::builder=info,hopr_transport::protocol::stream=off";
 
+/// For command()/respond() only: each core run has a runtime of its own (see prepare_and_spawn).
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
-static TO_CORE: Mutex<Option<mpsc::Sender<WorkerToCore>>> = Mutex::new(None);
-static ROOT: Mutex<Option<root::Root>> = Mutex::new(None);
+/// The current core run; TO_CORE and ROOT are tagged with it, so nothing of an older run reaches them.
+static RUN: AtomicU64 = AtomicU64::new(0);
+static TO_CORE: Mutex<Option<(u64, mpsc::Sender<WorkerToCore>)>> = Mutex::new(None);
+static ROOT: Mutex<Option<(u64, root::Root)>> = Mutex::new(None);
 static STARTED: AtomicBool = AtomicBool::new(false);
 /// Set by `shutdown()`: the core then stays down (no restart, no new start).
 static STOPPING: AtomicBool = AtomicBool::new(false);
@@ -147,6 +150,7 @@ fn prepare_and_spawn() -> Result<(), String> {
     if RUNTIME.get().is_none() {
         // SAFETY: no runtime thread exists yet; the UI thread is the only one reading env vars.
         unsafe { std::env::set_var(gnosis_vpn_lib::hopr::CURVY_ZK_DIR_ENV, config.curvy_zk_dir.as_os_str()) };
+        let _ = runtime(); // from now on the guard above is false
     }
     let blokli_url = url::Url::parse(BLOKLI_URL).map_err(|e| e.to_string())?;
     let host = blokli_url.host_str().ok_or("blokli host")?.to_string();
@@ -162,7 +166,12 @@ fn prepare_and_spawn() -> Result<(), String> {
     log::line(format!("gnosis: data in {}", dirs.data.display()));
     // client main: the network name comes from Blokli (query_network retries until Blokli answers)
     let spawn = SpawnParams::new(ConfigFileMode::Generated, AllowFlags::default(), blokli_url, None, dirs);
-    *ROOT.lock().unwrap() = Some(root::Root::new(blokli_ip));
+    // Upstream ends the worker process when the core returns, which stops everything it spawned
+    // (HOPR node, strategy/PIX reactor, runners). Here this run's own runtime, shut down after
+    // the run, does that: the next run never shares a process-wide runtime with an old node.
+    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().thread_name("gnosis-core").build().map_err(|e| format!("core runtime: {e}"))?;
+    let run = RUN.fetch_add(1, Ordering::SeqCst) + 1;
+    *ROOT.lock().unwrap() = Some((run, root::Root::new(blokli_ip)));
 
     let (sender, mut from_core) = mpsc::channel(32);
     // None at the first start; after the core ended on its own, the connection it was making
@@ -171,10 +180,10 @@ fn prepare_and_spawn() -> Result<(), String> {
         log::line(format!("gnosis: the new core resumes the connection to {t}"));
     }
     set_state(format!("starting (Blokli {blokli_ip}, network {NETWORK})"));
-    runtime().spawn(async move {
+    let spawned = std::thread::Builder::new().name("gnosis-run".into()).spawn(move || {
         let t0 = std::time::Instant::now();
         // `return` ends this run only; the cleanup below always follows
-        async move {
+        rt.block_on(async move {
             let params = spawn
                 .query_network(Duration::from_secs(15), Duration::from_secs(3), |kind, msg| log::line(format!("gnosis: Blokli not ready ({kind:?}): {msg}")))
                 .await;
@@ -187,29 +196,35 @@ fn prepare_and_spawn() -> Result<(), String> {
             }
             match Core::init(config, params, target, sender).await {
                 Ok((core, to_core)) => {
-                    *TO_CORE.lock().unwrap() = Some(to_core);
+                    *TO_CORE.lock().unwrap() = Some((run, to_core));
                     tokio::spawn(async move {
                         while let Some(CoreToWorker::RequestToRoot(req)) = from_core.recv().await {
-                            handle_request(req);
+                            handle_request(run, req);
                         }
                     });
                     set_state("running");
                     core.start().await;
-                    TO_CORE.lock().unwrap().take();
+                    take_if_run(&TO_CORE, run);
                     set_state("stopped");
                 }
                 Err(e) => set_state(format!("init failed: {e}")),
             }
-        }
-        .await;
+        });
         // no stale run mode or connection for the app once the core is gone
         *STATUS.lock().unwrap() = None;
-        if let Some(mut r) = ROOT.lock().unwrap().take() {
+        if let Some((_, mut r)) = take_if_run(&ROOT, run) {
             r.shutdown();
         }
+        // ends every task of this run (node, reactors, runners, the request forwarder); bounded
+        rt.shutdown_timeout(Duration::from_secs(10));
+        log::line(format!("gnosis: core run {run} ended after {} s", t0.elapsed().as_secs()));
         STARTED.store(false, Ordering::SeqCst);
         schedule_restart(t0.elapsed());
     });
+    if let Err(e) = spawned {
+        take_if_run(&ROOT, run);
+        return Err(format!("core thread: {e}"));
+    }
     start_status_poller();
     telemetry::start();
     Ok(())
@@ -238,38 +253,50 @@ fn schedule_restart(ran: Duration) {
     });
 }
 
-fn respond(resp: ResponseFromRoot) {
-    let Some(tx) = TO_CORE.lock().unwrap().clone() else { return };
+/// Takes the slot's value if it belongs to `run` (an older run's leftovers never touch a newer run).
+fn take_if_run<T>(slot: &Mutex<Option<(u64, T)>>, run: u64) -> Option<(u64, T)> {
+    let mut g = slot.lock().unwrap();
+    if crate::pure::same_run(g.as_ref().map(|(r, _)| *r), run) { g.take() } else { None }
+}
+
+fn respond(run: u64, resp: ResponseFromRoot) {
+    let tx = match TO_CORE.lock().unwrap().as_ref() {
+        Some((r, tx)) if crate::pure::same_run(Some(*r), run) => tx.clone(),
+        _ => return,
+    };
     runtime().spawn(async move {
         let _ = tx.send(WorkerToCore::ResponseFromRoot(resp)).await;
     });
 }
 
-fn with_root<T>(f: impl FnOnce(&mut root::Root) -> T) -> Option<T> {
-    ROOT.lock().unwrap().as_mut().map(f)
+fn with_root<T>(run: u64, f: impl FnOnce(&mut root::Root) -> T) -> Option<T> {
+    match ROOT.lock().unwrap().as_mut() {
+        Some((r, cur)) if crate::pure::same_run(Some(*r), run) => Some(f(cur)),
+        _ => None,
+    }
 }
 
-fn handle_request(req: RequestToRoot) {
+fn handle_request(run: u64, req: RequestToRoot) {
     match req {
         RequestToRoot::KillswitchLockdown { request_id, peer_ips, .. } => {
             log::line(format!("gnosis: kill switch requested ({} peer IPs) - not enforced yet on Windows", peer_ips.len()));
-            respond(ResponseFromRoot::KillswitchLockdown { request_id, res: Ok(()) });
+            respond(run, ResponseFromRoot::KillswitchLockdown { request_id, res: Ok(()) });
         }
         RequestToRoot::SetupTunnel { request_id, interface_address, mtu, dns, peer_ips, blokli_ip } => {
             // the address the worker really uses for Blokli (it may differ from our start-up lookup)
-            with_root(|r| r.blokli_ip = Some(blokli_ip));
+            with_root(run, |r| r.blokli_ip = Some(blokli_ip));
             // Blocking Win32 calls: off the runtime threads.
             std::thread::spawn(move || {
-                let res = with_root(|r| r.setup_tunnel(&interface_address, mtu, dns.as_deref(), &peer_ips))
+                let res = with_root(run, |r| r.setup_tunnel(&interface_address, mtu, dns.as_deref(), &peer_ips))
                     .unwrap_or_else(|| Err("core is stopping".into()));
                 if let Err(e) = &res {
                     log::line(format!("gnosis: tunnel setup failed: {e}"));
                 }
-                respond(ResponseFromRoot::TunnelReady { request_id, res });
+                respond(run, ResponseFromRoot::TunnelReady { request_id, res });
             });
         }
         RequestToRoot::TearDownWg => {
-            std::thread::spawn(|| with_root(|r| r.teardown_routes()));
+            std::thread::spawn(move || with_root(run, |r| r.teardown_routes()));
         }
         RequestToRoot::Ping { request_id, options } => {
             std::thread::spawn(move || {
@@ -277,11 +304,11 @@ fn handle_request(req: RequestToRoot) {
                 if let Err(e) = &res {
                     log::line(format!("gnosis: in-tunnel ping: {e}"));
                 }
-                respond(ResponseFromRoot::Ping { request_id, res });
+                respond(run, ResponseFromRoot::Ping { request_id, res });
             });
         }
         RequestToRoot::UpdatePeerIps { peer_ips } => {
-            std::thread::spawn(move || with_root(|r| r.update_peer_ips(&peer_ips)));
+            std::thread::spawn(move || with_root(run, |r| r.update_peer_ips(&peer_ips)));
         }
         RequestToRoot::ProbeStopped => {}
     }
@@ -302,7 +329,7 @@ pub fn command(json: &str) -> Result<serde_json::Value, String> {
 }
 
 fn send_command(cmd: WorkerCommand) -> Result<serde_json::Value, String> {
-    let tx = TO_CORE.lock().unwrap().clone().ok_or("core is not running yet")?;
+    let tx = TO_CORE.lock().unwrap().as_ref().map(|(_, tx)| tx.clone()).ok_or("core is not running yet")?;
     runtime().block_on(async move {
         let (resp, rx) = oneshot::channel();
         tx.send(WorkerToCore::WorkerCommand { cmd, resp }).await.map_err(|_| "core stopped".to_string())?;
@@ -449,10 +476,10 @@ fn start_status_poller() {
 pub fn shutdown() {
     STOPPING.store(true, Ordering::SeqCst);
     TARGET.lock().unwrap().take();
-    if let Some(tx) = TO_CORE.lock().unwrap().take() {
+    if let Some((_, tx)) = TO_CORE.lock().unwrap().take() {
         let _ = tx.try_send(WorkerToCore::Shutdown);
     }
-    if let Some(mut r) = ROOT.lock().unwrap().take() {
+    if let Some((_, mut r)) = ROOT.lock().unwrap().take() {
         r.shutdown();
     }
 }
