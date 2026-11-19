@@ -16,6 +16,8 @@ if cmd == "find":
         sys.exit("list failed: 500")
     print(4242)
 if cmd == "delete":
+    if os.environ["FAKE_MODE"] == "slow":
+        sys.exit("NOT verified gone")
     print("droplet", sys.argv[2], "verified gone")
 "#;
 
@@ -31,7 +33,8 @@ fn run_term(mode: &str, term_after_ms: Option<u64>) -> (bool, String, String) {
     fs::create_dir_all(&d).unwrap();
     fs::copy(repo.join("scripts/do-build/run.sh"), d.join("run.sh")).unwrap();
     fs::write(d.join("droplet.py"), FAKE).unwrap();
-    fs::write(t.join("deadline"), "import sys\n").unwrap();
+    let deadline = "import os, sys\nopen(os.environ[\"FAKE_LOG\"], \"a\").write(\"deadline \" + \" \".join(sys.argv[1:]) + \"\\n\")\n";
+    fs::write(t.join("deadline"), deadline).unwrap();
     let st = t.join("home/.local/state/gvpndows-do");
     fs::create_dir_all(&st).unwrap();
     for k in ["id_ed25519", "id_ed25519.pub"] {
@@ -72,8 +75,10 @@ fn failed_lookup_warns_instead_of_claiming_no_droplet() {
 }
 
 #[test]
-fn term_during_create_still_deletes_the_droplet() {
+fn term_during_create_arms_the_deadline_and_deletes_the_droplet() {
     let (ok, calls, err) = run_term("slow", Some(500));
     assert!(!ok);
-    assert!(calls.contains("delete 4243"), "calls: {calls}\nstderr: {err}");
+    let (deadline, delete) = (calls.find("deadline start gvpndows-build-"), calls.find("\ndelete 4243"));
+    assert!(deadline.is_some() && delete.is_some() && deadline < delete, "calls: {calls}\nstderr: {err}");
+    assert!(calls.contains("delete 4243\n") && err.contains("deadline stays armed"), "calls: {calls}\nstderr: {err}");
 }

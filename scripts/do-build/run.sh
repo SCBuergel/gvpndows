@@ -17,21 +17,22 @@ KNOWN_HOSTS=$ST/$NAME.known_hosts   # fresh per run: droplet IPs get reused
 t0=$(date +%s); t=$t0
 step() { n=$(date +%s); echo "STEP $1 $((n - t))"; t=$n; }
 id=""; ip=""; cpid=""
+arm_deadline() { python3 "$DEADLINE" start "$NAME" "$DEADLINE_S" -- python3 -I "$REPO/scripts/do-build/droplet.py" delete "$id"; }
 # The id of a create that did not report one in time: the create may still be running, or its
 # POST failed client-side after DigitalOcean accepted it, so look the droplet up by its name.
 find_created() {
     while [ -z "$id" ] && kill -0 "$cpid" 2>/dev/null; do id=$(head -1 "$ST/$NAME.create" 2>/dev/null || true); sleep 1; done
-    kill "$cpid" 2>/dev/null || true
+    ! kill -0 "$cpid" 2>/dev/null || kill "$cpid" 2>/dev/null || true
     [ -n "$id" ] || id=$(head -1 "$ST/$NAME.create" 2>/dev/null || true)
-    [ -z "$id" ] || return 0
     for _ in 1 2 3; do
+        [ -z "$id" ] || break
         if ! id=$(python3 -I scripts/do-build/droplet.py find "$NAME" | head -1); then
             id=""; echo "!!! cannot look up droplet $NAME; it may exist. Check https://cloud.digitalocean.com/droplets !!!" >&2; return 0
         fi
-        [ -z "$id" ] || return 0
-        sleep 5
+        [ -n "$id" ] || sleep 5
     done
-    echo "no droplet named $NAME found" >&2
+    if [ -z "$id" ]; then echo "no droplet named $NAME found" >&2; return 0; fi
+    arm_deadline || echo "!!! no deadline armed for droplet $id !!!" >&2
 }
 teardown() {
     rc=$?
@@ -60,7 +61,7 @@ cpid=$!
 while [ -z "$id" ] && kill -0 $cpid 2>/dev/null; do id=$(head -1 "$ST/$NAME.create" 2>/dev/null || true); [ -n "$id" ] || sleep 1; done
 [ -n "$id" ] || id=$(head -1 "$ST/$NAME.create" 2>/dev/null || true)
 [ -n "$id" ] || { echo "droplet creation failed" >&2; exit 1; }
-python3 "$DEADLINE" start "$NAME" "$DEADLINE_S" -- python3 -I "$REPO/scripts/do-build/droplet.py" delete "$id"
+arm_deadline
 wait $cpid
 ip=$(sed -n 2p "$ST/$NAME.create" | cut -d' ' -f1)
 echo "droplet $id at $ip ($SIZE, \$$(sed -n 2p "$ST/$NAME.create" | cut -d' ' -f2)/h)"
