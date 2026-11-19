@@ -1,7 +1,7 @@
 //! Platform-independent logic split out of the Windows code so it can be unit-tested anywhere:
 //! pipe request routing, the HOPR leak check on tunnel packets, the tunnel routes to add, the WAN, log chunking and rotation, e2e plan steps.
 
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 
 /// Longest request line the service accepts from the pipe (requests are small JSON objects).
 pub const MAX_REQUEST: usize = 64 * 1024;
@@ -291,6 +291,11 @@ pub fn serve_pipe_loop<P: PipeServer>(p: &mut P) {
 pub fn core_restart(prev_attempt: u32, ran_secs: u64) -> (u32, u64) {
     let attempt = if ran_secs >= 600 { 1 } else { prev_attempt.saturating_add(1) };
     (attempt, (5u64 << (attempt - 1).min(6)).min(300))
+}
+
+/// The tunnel's DNS servers from the core's comma-separated list; unparsable entries are dropped.
+pub fn tunnel_dns_servers(dns: Option<&str>) -> Vec<IpAddr> {
+    dns.map_or(Vec::new(), |d| d.split(',').filter_map(|s| s.trim().parse().ok()).collect())
 }
 
 #[cfg(test)]

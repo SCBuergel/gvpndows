@@ -29,6 +29,9 @@ Gnosis VPN for Windows, built step by step (same approach as the Android app in 
   - State: `%ProgramData%\GnosisVPN` and `%ProgramData%\gvpndows`. Both are owned by SYSTEM and readable
     by SYSTEM and Administrators only, because they hold the node key. If they can't be secured, the
     service doesn't start.
+  - DNS: while the tunnel's routes are up, a WFP filter lets DNS (port 53) out only through the
+    tunnel or loopback, as upstream sends all queries to the tunnel (`~.`). It lives in a dynamic
+    WFP session, so it goes with the routes or when the service dies. Other ports (DoH) are not covered.
   - The service never connects on its own. It starts the core at once and retries every 10 s until
     the network allows it (Blokli must be reachable). When the core ends on its own (a final connect
     error, Blokli moved), it starts it again, after 5 s and backing off to 5 minutes.

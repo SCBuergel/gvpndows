@@ -46,9 +46,33 @@ pub fn post_text(title: &str, body: &str) -> Result<(), String> {
     post(title, body)
 }
 
+/// The relay host's last resolved addresses. While the tunnel is up DNS goes only through it (the
+/// DNS guard), so a stalled tunnel would also stop the relay's lookups; then these are used.
+static LAST_ADDRS: Mutex<Vec<std::net::SocketAddr>> = Mutex::new(Vec::new());
+
+fn resolve(netloc: &str) -> std::io::Result<Vec<std::net::SocketAddr>> {
+    use std::net::ToSocketAddrs;
+    let cached = || LAST_ADDRS.lock().map(|a| a.clone()).unwrap_or_default();
+    match netloc.to_socket_addrs().map(|a| a.collect::<Vec<_>>()) {
+        Ok(a) if !a.is_empty() => {
+            if let Ok(mut l) = LAST_ADDRS.lock() {
+                *l = a.clone();
+            }
+            Ok(a)
+        }
+        r => match cached() {
+            c if !c.is_empty() => Ok(c),
+            _ => r,
+        },
+    }
+}
+
 fn post(title: &str, body: &str) -> Result<(), String> {
     let topic = TOPIC.ok_or("no relay topic in this build")?;
-    ureq::post(&format!("https://ntfy.sh/{topic}"))
+    ureq::AgentBuilder::new()
+        .resolver(resolve)
+        .build()
+        .post(&format!("https://ntfy.sh/{topic}"))
         .timeout(Duration::from_secs(20))
         .set("Title", title)
         .send_string(body)

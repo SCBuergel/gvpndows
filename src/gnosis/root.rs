@@ -4,11 +4,12 @@
 //!   (the core's own HOPR traffic must not enter the tunnel it carries);
 //! - 0.0.0.0/1, 128.0.0.0/1 and the VPN subnet 10.128.0.0/9 into the tunnel;
 //! - ::/1 and 8000::/1 into the tunnel as an IPv6 leak guard (the tunnel carries IPv4 only);
-//! - DNS servers on the tunnel interface.
+//! - DNS servers on the tunnel interface, and the WFP DNS guard (port 53 only through the tunnel
+//!   or loopback) while the routes are up, as upstream diverts all queries with resolvectl `~.`.
 //! The adapter stays up across the core's reconnects; only routes change.
 
 use crate::log;
-use crate::win::net;
+use crate::win::{net, wfp};
 use std::collections::BTreeSet;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -156,6 +157,9 @@ pub struct Root {
     /// Recorded bypass routes of an earlier run that could not be removed at start: ours.
     stale_bypass: Vec<net::Route>,
     tunnel_routes: Vec<net::Route>,
+    /// Blocks DNS outside the tunnel (adapter LUID) while the routes are up; dropping it removes
+    /// the filters.
+    dns_guard: Option<(u64, wfp::KillSwitch)>,
     pub blokli_ip: Option<Ipv4Addr>,
     /// DEBUG FEATURE ONLY: the developer log relay's addresses, routed outside the tunnel so logs
     /// still arrive while the exit holds the tunnel's traffic. Empty in release builds. Everything
@@ -334,12 +338,15 @@ impl Root {
             }
         }
 
-        // 4. DNS (comma-separated list from the core).
-        if let Some(dns) = dns {
-            let servers: Vec<IpAddr> = dns.split(',').filter_map(|s| s.trim().parse().ok()).collect();
-            if !servers.is_empty() {
-                let a = self.adapter.as_ref().expect("adapter");
-                a._adapter.set_dns_servers(&servers).map_err(|e| format!("DNS: {e}"))?;
+        // 4. DNS (comma-separated list from the core), and only through the tunnel.
+        let servers = crate::pure::tunnel_dns_servers(dns);
+        if !servers.is_empty() {
+            let a = self.adapter.as_ref().expect("adapter");
+            a._adapter.set_dns_servers(&servers).map_err(|e| format!("DNS: {e}"))?;
+            if self.dns_guard.as_ref().map(|g| g.0) != Some(tun_luid) {
+                self.dns_guard = None; // an older adapter's guard goes first (same sublayer key)
+                self.dns_guard = Some((tun_luid, wfp::KillSwitch::dns_guard(tun_luid)?));
+                log::line("DNS guard on: port 53 only through the tunnel");
             }
         }
         log::line(format!(
@@ -368,6 +375,9 @@ impl Root {
 
     /// Removes the routes (the core disconnected); the adapter stays for the next connect.
     pub fn teardown_routes(&mut self) {
+        if self.dns_guard.take().is_some() {
+            log::line("DNS guard off");
+        }
         for r in self.tunnel_routes.drain(..).rev() {
             if let Err(e) = net::delete_route(&r) {
                 log::line(format!("teardown: {e}"));

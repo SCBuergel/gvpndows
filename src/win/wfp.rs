@@ -1,6 +1,7 @@
 //! Kill switch with the Windows Filtering Platform: block everything except the tunnel interface,
-//! loopback, DHCP and the WireGuard endpoint. The filters live in a *dynamic* WFP session, so
-//! Windows removes them when the engine handle closes, including when this process crashes.
+//! loopback, DHCP and the WireGuard endpoint; and the DNS guard: DNS (remote port 53) only through
+//! the tunnel interface or loopback. The filters live in a *dynamic* WFP session, so Windows removes
+//! them when the engine handle closes, including when this process crashes.
 
 use std::net::SocketAddrV4;
 use windows_sys::core::GUID;
@@ -9,9 +10,11 @@ use windows_sys::Win32::NetworkManagement::WindowsFilteringPlatform::*;
 
 // Our own sublayer key (random, fixed so the filters are easy to recognise with `netsh wfp show state`).
 const SUBLAYER: GUID = GUID::from_u128(0x6776706e_646f_7773_8000_6b696c6c7377);
+const DNS_SUBLAYER: GUID = GUID::from_u128(0x6776706e_646f_7773_8000_646e73677264);
 
 pub struct KillSwitch {
     engine: HANDLE,
+    sublayer: GUID,
 }
 
 // The engine handle is only used from the thread that owns the KillSwitch at the time.
@@ -41,35 +44,51 @@ enum Cond {
 
 impl KillSwitch {
     pub fn enable(tunnel_luid: u64, endpoint: SocketAddrV4) -> Result<Self, String> {
+        unsafe { Self::open("gvpndows kill switch", SUBLAYER, |ks| ks.add_all(tunnel_luid, endpoint)) }
+    }
+
+    /// The DNS guard (the Windows analogue of upstream's resolvectl `~.`): blocks remote port 53
+    /// (UDP and TCP, IPv4 and IPv6) except through the tunnel interface and loopback, so the DNS
+    /// Client cannot fall back to the WAN adapter's servers.
+    pub fn dns_guard(tunnel_luid: u64) -> Result<Self, String> {
         unsafe {
-            let mut session: FWPM_SESSION0 = std::mem::zeroed();
-            let mut name = wide("gvpndows kill switch");
-            session.displayData.name = name.as_mut_ptr();
-            session.flags = FWPM_SESSION_FLAG_DYNAMIC;
-            let mut engine: HANDLE = std::ptr::null_mut();
-            check(
-                "engine open",
-                FwpmEngineOpen0(std::ptr::null(), 10 /* RPC_C_AUTHN_WINNT */, std::ptr::null(), &session, &mut engine),
-            )?;
-            let ks = KillSwitch { engine };
-            check("transaction begin", FwpmTransactionBegin0(engine, 0))?;
-            if let Err(e) = ks.add_all(tunnel_luid, endpoint) {
-                FwpmTransactionAbort0(engine);
-                return Err(e); // Drop closes the engine
-            }
-            check("transaction commit", FwpmTransactionCommit0(engine))?;
-            Ok(ks)
+            Self::open("gvpndows DNS guard", DNS_SUBLAYER, |ks| {
+                for layer in [&FWPM_LAYER_ALE_AUTH_CONNECT_V4, &FWPM_LAYER_ALE_AUTH_CONNECT_V6] {
+                    ks.add(layer, "permit DNS in the tunnel", 15, true, &[Cond::RemotePort(53), Cond::LocalInterface(tunnel_luid)])?;
+                    ks.add(layer, "permit DNS on loopback", 15, true, &[Cond::RemotePort(53), Cond::Loopback])?;
+                    ks.add(layer, "block DNS outside the tunnel", 0, false, &[Cond::RemotePort(53)])?;
+                }
+                Ok(())
+            })
         }
     }
 
-    unsafe fn add_all(&self, tunnel_luid: u64, endpoint: SocketAddrV4) -> Result<(), String> {
+    /// Opens a dynamic session and adds a sublayer and `fill`'s filters in one transaction.
+    unsafe fn open(name: &str, sublayer: GUID, fill: impl FnOnce(&Self) -> Result<(), String>) -> Result<Self, String> {
+        let mut session: FWPM_SESSION0 = std::mem::zeroed();
+        let mut wname = wide(name);
+        session.displayData.name = wname.as_mut_ptr();
+        session.flags = FWPM_SESSION_FLAG_DYNAMIC;
+        let mut engine: HANDLE = std::ptr::null_mut();
+        check(
+            "engine open",
+            FwpmEngineOpen0(std::ptr::null(), 10 /* RPC_C_AUTHN_WINNT */, std::ptr::null(), &session, &mut engine),
+        )?;
+        let ks = KillSwitch { engine, sublayer };
+        check("transaction begin", FwpmTransactionBegin0(engine, 0))?;
         let mut sl: FWPM_SUBLAYER0 = std::mem::zeroed();
-        let mut sl_name = wide("gvpndows kill switch");
-        sl.subLayerKey = SUBLAYER;
-        sl.displayData.name = sl_name.as_mut_ptr();
+        sl.subLayerKey = sublayer;
+        sl.displayData.name = wname.as_mut_ptr();
         sl.weight = 0xFFFF;
-        check("sublayer add", FwpmSubLayerAdd0(self.engine, &sl, std::ptr::null_mut()))?;
+        if let Err(e) = check("sublayer add", FwpmSubLayerAdd0(engine, &sl, std::ptr::null_mut())).and_then(|_| fill(&ks)) {
+            FwpmTransactionAbort0(engine);
+            return Err(e); // Drop closes the engine
+        }
+        check("transaction commit", FwpmTransactionCommit0(engine))?;
+        Ok(ks)
+    }
 
+    unsafe fn add_all(&self, tunnel_luid: u64, endpoint: SocketAddrV4) -> Result<(), String> {
         let ep_ip = u32::from(*endpoint.ip()); // WFP wants IPv4 addresses in host byte order
         let layers_v4 = [FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4];
         let layers_v6 = [FWPM_LAYER_ALE_AUTH_CONNECT_V6, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6];
@@ -143,7 +162,7 @@ impl KillSwitch {
         let mut f: FWPM_FILTER0 = std::mem::zeroed();
         f.displayData.name = name.as_mut_ptr();
         f.layerKey = *layer;
-        f.subLayerKey = SUBLAYER;
+        f.subLayerKey = self.sublayer;
         f.weight.r#type = FWP_UINT8;
         f.weight.Anonymous.uint8 = weight;
         f.numFilterConditions = fc.len() as u32;
