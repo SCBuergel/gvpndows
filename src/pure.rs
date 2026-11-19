@@ -1,5 +1,5 @@
 //! Platform-independent logic split out of the Windows code so it can be unit-tested anywhere:
-//! pipe request routing, the HOPR leak check on tunnel packets, log chunking, e2e plan steps.
+//! pipe request routing, the HOPR leak check on tunnel packets, the tunnel routes to add, log chunking, e2e plan steps.
 
 use std::net::Ipv4Addr;
 
@@ -57,6 +57,22 @@ pub fn hopr_leak_dst(p: &[u8], own_ports: &[u16]) -> Option<Ipv4Addr> {
     }
     let sport = u16::from_be_bytes([p[ihl], p[ihl + 1]]);
     own_ports.contains(&sport).then(|| Ipv4Addr::new(p[16], p[17], p[18], p[19]))
+}
+
+/// The routes that send all traffic into the tunnel (destination, prefix length): both IPv4 halves,
+/// the exit's 10.128.0.0/9, and the two IPv6 halves (a leak guard: the tunnel carries no IPv6).
+pub const TUNNEL_ROUTES: [(std::net::IpAddr, u8); 5] = [
+    (std::net::IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1),
+    (std::net::IpAddr::V4(Ipv4Addr::new(128, 0, 0, 0)), 1),
+    (std::net::IpAddr::V4(Ipv4Addr::new(10, 128, 0, 0)), 9),
+    (std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED), 1),
+    (std::net::IpAddr::V6(std::net::Ipv6Addr::new(0x8000, 0, 0, 0, 0, 0, 0, 0)), 1),
+];
+
+/// The tunnel routes still to add, given those in place as (interface LUID, destination, prefix
+/// length): an earlier setup may have stopped part-way, and routes on another LUID do not count.
+pub fn missing_tunnel_routes(present: &[(u64, std::net::IpAddr, u8)], tun_luid: u64) -> Vec<(std::net::IpAddr, u8)> {
+    TUNNEL_ROUTES.into_iter().filter(|&(d, l)| !present.contains(&(tun_luid, d, l))).collect()
 }
 
 /// Owners the service trusts for its state folders: SYSTEM and Administrators. A folder owned by

@@ -281,24 +281,21 @@ impl Root {
         net::set_interface(tun_luid, false, mtu, 5)?;
         let _ = net::set_interface(tun_luid, true, mtu.max(1280), 5);
 
-        // 3. Routes into the tunnel.
-        if self.tunnel_routes.is_empty() {
-            let v4 = Ipv4Addr::UNSPECIFIED.into();
-            let v6 = Ipv6Addr::UNSPECIFIED.into();
-            let routes: [(IpAddr, u8, IpAddr); 5] = [
-                (Ipv4Addr::new(0, 0, 0, 0).into(), 1, v4),
-                (Ipv4Addr::new(128, 0, 0, 0).into(), 1, v4),
-                (Ipv4Addr::new(10, 128, 0, 0).into(), 9, v4),
-                (Ipv6Addr::UNSPECIFIED.into(), 1, v6),
-                (Ipv6Addr::new(0x8000, 0, 0, 0, 0, 0, 0, 0).into(), 1, v6),
-            ];
-            for (dest, l, nh) in routes {
-                let r = net::Route { if_luid: tun_luid, dest, prefix_len: l, next_hop: nh };
-                match net::add_route(&r) {
-                    Ok(_) => self.tunnel_routes.push(r),
-                    Err(e) if dest.is_ipv6() => log::line(format!("{e} (IPv6 leak guard incomplete)")),
-                    Err(e) => return Err(e),
-                }
+        // 3. Routes into the tunnel: each one not in place yet, as an earlier setup may have stopped
+        // part-way. Routes recorded on another LUID (an older adapter) do not count.
+        for r in self.tunnel_routes.iter().filter(|r| r.if_luid != tun_luid) {
+            let _ = net::delete_route(r);
+        }
+        self.tunnel_routes.retain(|r| r.if_luid == tun_luid);
+        let present: Vec<(u64, IpAddr, u8)> = self.tunnel_routes.iter().map(|r| (r.if_luid, r.dest, r.prefix_len)).collect();
+        for (dest, l) in crate::pure::missing_tunnel_routes(&present, tun_luid) {
+            let nh: IpAddr = if dest.is_ipv4() { Ipv4Addr::UNSPECIFIED.into() } else { Ipv6Addr::UNSPECIFIED.into() };
+            let r = net::Route { if_luid: tun_luid, dest, prefix_len: l, next_hop: nh };
+            match net::add_route(&r) {
+                // Ok(false): the identical route on our own adapter already exists (left by an earlier run)
+                Ok(_) => self.tunnel_routes.push(r),
+                Err(e) if dest.is_ipv6() => log::line(format!("{e} (IPv6 leak guard incomplete; retried on the next setup)")),
+                Err(e) => return Err(e),
             }
         }
 
