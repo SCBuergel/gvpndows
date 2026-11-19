@@ -144,8 +144,8 @@ public sealed class RealBackend
     /// "Send log to developer" button.</summary>
     public bool DebugRelay { get; private set; }
     public string? LastError => link.LastError;
-    /// <summary>MB per wxHOPR: the status's pix_price_per_byte, else the exit's chunk price once known
-    /// (660 MB for 5.94 wxHOPR on prod).</summary>
+    /// <summary>MB per wxHOPR: the status's pix_price_per_byte, else the session's bytes bought per
+    /// cost (both cover every chunk committed) once known (660 MB for 5.94 wxHOPR on prod).</summary>
     double mbPerWx = 660.160512 / 5.941444608;
 
     static readonly Dictionary<string, string> COUNTRY = new()
@@ -351,9 +351,10 @@ public sealed class RealBackend
         var pix = conn?["pix"];
         if (pix != null && curId != null)
         {
-            var left = Ms(pix["bytes_left"]) / 1e6; var chunk = Ms(pix["chunk_bytes"]) / 1e6; var cost = Wei(pix["cost"]);
+            var left = Ms(pix["bytes_left"]) / 1e6; var chunk = Ms(pix["chunk_bytes"]) / 1e6;
+            var bought = Ms(pix["bytes_bought"]) / 1e6; var cost = Wei(pix["cost"]);
             if (left > 0) S.Alloc[curId] = left;
-            if (chunk > 0 && cost > 0) mbPerWx = chunk / cost;
+            if (price <= 0 && bought > 0 && cost > 0) mbPerWx = bought / cost;
             if (chunk > 0) ChunkMb = chunk;
         }
         var waiting = conn?["stall"]?["awaiting_payment_since"] != null;
@@ -365,7 +366,7 @@ public sealed class RealBackend
         }
         else if (S.Flash?.Lead == "Waiting for the exit to see your payment.") S.Flash = null;
 
-        // balance: the Safe's wxHOPR, shown in MB at the exit's chunk price
+        // balance: the Safe's wxHOPR, shown in MB at the PIX price
         if (bal?["data"] is JsonNode b && b["type"]?.ToString() == "available")
             S.Balance = Math.Round(Wei(b["safe"]) * mbPerWx);
     }

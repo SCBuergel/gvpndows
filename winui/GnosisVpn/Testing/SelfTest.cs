@@ -52,7 +52,7 @@ public static class SelfTest
         // ---- running, connected, with PIX data
         var since = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 90_000;
         var connected = $"{{\"type\":\"connected\",\"destination\":\"gvpn-lt-1-ynm1\",\"since\":{since},\"tunnel_ping_rtt\":74,\"stall\":null," +
-                        "\"pix\":{\"phase\":{\"type\":\"funded\"},\"bytes_left\":639202344,\"chunk_bytes\":660160512,\"cost\":\"5941444608000000000\"}}";
+                        "\"pix\":{\"phase\":{\"type\":\"funded\"},\"chunks_committed\":1,\"bytes_left\":639202344,\"chunk_bytes\":660160512,\"bytes_bought\":660160512,\"cost\":\"5941444608000000000\"}}";
         rb.ApplyForTest(State("{\"type\":\"running\"}", connected), JsonNode.Parse("{\"type\":\"balance\",\"data\":{\"type\":\"available\",\"safe\":\"24660000000000000000\"}}"));
         Check(g.S.Fail == null, "a reply clears the failure page");
         Check(g.EX.Count == 3 && g.EX[0].Country == "Germany" && g.EX[1].City == "GVPN-LT-1", "destinations become exits");
@@ -65,6 +65,15 @@ public static class SelfTest
         Check(Math.Round(g.Left("gvpn-lt-1-ynm1")) == 639, "MB left from PIX bytes_left");
         Check(g.ExOrNull("gvpn-lt-1-ynm1")?.Ping == 74, "ping from tunnel_ping_rtt");
         Check(Math.Abs(g.S.Balance - Math.Round(24.66 * 660.160512 / 5.941444608)) < 1, "balance in MB at the chunk price");
+        // three chunks: bytes_bought and cost cover all of them, so the rate and the balance stay the same
+        var safe = JsonNode.Parse("{\"type\":\"balance\",\"data\":{\"type\":\"available\",\"safe\":\"24660000000000000000\"}}");
+        var three = connected.Replace("\"chunks_committed\":1", "\"chunks_committed\":3").Replace("\"bytes_bought\":660160512", "\"bytes_bought\":1980481536").Replace("5941444608000000000", "17824333824000000000");
+        rb.ApplyForTest(State("{\"type\":\"running\"}", three), safe);
+        Check(Math.Abs(g.S.Balance - Math.Round(24.66 * 660.160512 / 5.941444608)) < 1, "balance unchanged after three PIX chunks");
+        // the status's pix_price_per_byte (here twice the session's) wins over the session's rate
+        var priced = State("{\"type\":\"running\"}", three); priced["status"]!["data"]!["pix_price_per_byte"] = "18000000000";
+        rb.ApplyForTest(priced, safe);
+        Check(Math.Abs(g.S.Balance - Math.Round(24.66 * 1e-6 / 1.8e-8)) < 1, "balance at pix_price_per_byte, not the session's rate");
         Check(Messages.ScreenCode(g) == "S01", "connected screen");
 
         // ---- the exit waits for the payment
