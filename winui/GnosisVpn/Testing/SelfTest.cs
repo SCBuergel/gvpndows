@@ -124,6 +124,20 @@ public static class SelfTest
         Check(rb.Handle("disconnect", null) && g.S.Conn == "idle", "disconnect");
         Check(!rb.Handle("view", null) && !rb.Handle("ptab", null), "UI-only actions stay in the UI");
 
+        // ---- switching exits while connected (R7-7): the old exit's state does not end the new connect
+        const string GER = "gvpn-ger-1-j9os";
+        rb.ApplyForTest(State("{\"type\":\"running\"}", connected), null);
+        rb.Handle("pick2", GER);
+        rb.ApplyForTest(State("{\"type\":\"running\"}", connected), null);
+        Check(g.S.Conn == "connecting" && g.S.Loc == GER, "switching: the old exit's status keeps the new connect shown");
+        var toGer = State("{\"type\":\"running\"}"); toGer["status"]!["data"]!["target"] = GER;
+        rb.ApplyForTest(toGer, null);
+        Check(g.S.Conn == "connecting" && g.S.Loc == GER, "switching: the new exit's probe shows connecting");
+        g.S.Flash = null; g.S.Fq = new();
+        rb.ApplyForTest(State("{\"type\":\"running\"}"), null);
+        Check(g.S.Conn == "idle" && g.S.Flash?.Lead == "Couldn’t connect to GVPN-GER-1.", "switching: the new exit's failure is reported");
+        g.S.Flash = null; g.S.Fq = new();
+
         // ---- connect replies and connects to no known exit
         g.S.Loc = "";
         Check(rb.Handle("connect", null) && g.S.Conn == "idle", "connect with no exit is ignored");

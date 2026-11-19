@@ -330,7 +330,18 @@ public sealed class RealBackend
         // After Connect the core first opens a probe session to the exit (about a minute) while its
         // status still says disconnected: the app shows "Connecting" for up to 3 minutes meanwhile.
         if (pendingConnect != null && AppEngine.Now - pendingAt > PENDING_MS) pendingConnect = null;
-        switch (kind)
+        // The exit a connect is headed to: the status's target says so, or the core has not taken the
+        // connect up yet. Until the connection is about that exit, another exit's state (the old one
+        // while switching, or the 3 s old cached status) is not shown.
+        var target = data?["target"]?.ToString();
+        if (attemptDest != null && (target == attemptDest || curId == attemptDest && kind is "connecting" or "reconnecting")) attemptSeen = true;
+        bool headed = attemptDest != null && (target == attemptDest || pendingConnect != null && !attemptSeen);
+        if (headed && curId != attemptDest)
+        {
+            if (S.Conn != "connecting") { S.CStart = AppEngine.Now; S.CDur = 90000; }
+            S.Conn = "connecting"; S.Loc = attemptDest!;
+        }
+        else switch (kind)
         {
             case "connecting":
                 if (S.Conn != "connecting") { S.CStart = AppEngine.Now - Math.Max(0, NowMs - since); S.CDur = 30000; }
@@ -346,22 +357,22 @@ public sealed class RealBackend
                 if (g.ExOrNull(S.Loc) is Exit cur && conn?["tunnel_ping_rtt"] is JsonNode rtt && Ms(rtt) > 0) cur.Ping = (int)Ms(rtt);
                 break;
             default:
-                if (pendingConnect == null) { if (S.Conn != "idle") { S.Conn = "idle"; } }
+                if (!headed && S.Conn != "idle") S.Conn = "idle";
                 break;
         }
 
         // A connect attempt the core gave up on (back to disconnected without the user asking): say why.
         if (attemptDest != null)
         {
-            if (kind is "connecting" or "reconnecting" && curId == attemptDest) attemptSeen = true;
-            else if (kind == "connected") attemptDest = null;
-            // the core started connecting and dropped back, or never started within PENDING_MS
-            else if (kind is null or "disconnected" && pendingConnect == null)
+            if (kind == "connected" && curId == attemptDest) attemptDest = null;
+            // the core is no longer headed there (it dropped back, or never started within PENDING_MS)
+            // and is not connecting to it
+            else if (!headed && !(curId == attemptDest && kind is "connecting" or "reconnecting"))
             {
                 var name = g.ExOrNull(attemptDest)?.City ?? attemptDest;
                 App.Log($"backend: connect to {attemptDest} ended without a connection: {WhyNot(attemptDest)}");
                 g.SetFlash("bad", $"Couldn’t connect to {name}.", WhyNot(attemptDest));
-                attemptDest = null;
+                attemptDest = null; pendingConnect = null;
             }
         }
 
