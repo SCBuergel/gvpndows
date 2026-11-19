@@ -388,9 +388,10 @@ public sealed class RealBackend
         }
         else if (S.Flash?.Lead == "Waiting for the exit to see your payment.") S.Flash = null;
 
-        // balance: the Safe's wxHOPR, shown in MB at the PIX price
+        // balance: what can still pay exits, the Safe's wxHOPR plus the Curvy PIX pool's (null without
+        // a pool), shown in MB at the PIX price
         if (bal?["data"] is JsonNode b && b["type"]?.ToString() == "available")
-            S.Balance = Math.Round(Wei(b["safe"]) * mbPerWx);
+            S.Balance = Math.Round((Wei(b["safe"]) + Wei(b["pix_pool"])) * mbPerWx);
     }
 
     /// <summary>The core's answer to connect: refusals are shown at once instead of a silent return to idle.</summary>

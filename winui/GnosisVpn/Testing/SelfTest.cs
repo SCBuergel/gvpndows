@@ -77,6 +77,12 @@ public static class SelfTest
         var priced = State("{\"type\":\"running\"}", three); priced["status"]!["data"]!["pix_price_per_byte"] = "18000000000";
         rb.ApplyForTest(priced, safe);
         Check(Math.Abs(g.S.Balance - Math.Round(24.66 * 1e-6 / 1.8e-8)) < 1, "balance at pix_price_per_byte, not the session's rate");
+        // R7-6: the Curvy PIX pool pays exits too, so it counts; without pix_pool only the Safe
+        rb.ApplyForTest(priced, JsonNode.Parse("{\"type\":\"balance\",\"data\":{\"type\":\"available\",\"safe\":\"1000000000000000000\",\"pix_pool\":\"35350000000000000000\"}}"));
+        Check(Math.Abs(g.S.Balance - Math.Round(36.35 * 1e-6 / 1.8e-8)) < 1, "balance counts the Safe and the PIX pool");
+        rb.ApplyForTest(priced, JsonNode.Parse("{\"type\":\"balance\",\"data\":{\"type\":\"available\",\"safe\":\"1000000000000000000\",\"pix_pool\":null}}"));
+        Check(Math.Abs(g.S.Balance - Math.Round(1e-6 / 1.8e-8)) < 1, "balance without a PIX pool is the Safe's");
+        rb.ApplyForTest(priced, safe);
         Check(Messages.ScreenCode(g) == "S01", "connected screen");
 
         // ---- the exit waits for the payment

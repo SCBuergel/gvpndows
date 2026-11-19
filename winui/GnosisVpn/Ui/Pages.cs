@@ -427,7 +427,7 @@ public sealed class Pages
     UIElement Balance()
     {
         var e = G.Ex(S.Loc); var a = G.Left();
-        var bal = Box(V(8, Cap("Available balance"), Mono(Mb(S.Balance), 40, bold: true), Txt("Data your Safe can still pay for, at the current exit's price.", 14, "text-2")));
+        var bal = Box(V(8, Cap("Available balance"), Mono(Mb(S.Balance), 40, bold: true), Txt("Data your Safe and PIX pool can still pay for, at the current exit's price.", 14, "text-2")));
         var p = Page(Title("Balance"), bal);
         p.Children.Add(Section("Add data"));
         p.Children.Add(Grp(
