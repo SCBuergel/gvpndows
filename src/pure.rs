@@ -363,6 +363,15 @@ pub fn same_run(slot: Option<u64>, run: u64) -> bool {
     slot == Some(run)
 }
 
+/// Runs `f` on each value sent to the returned channel, one at a time and in the order sent, on a
+/// thread of its own (root requests: a TearDownWg must not overtake or trail the SetupTunnel next to
+/// it). The thread ends once every sender is dropped.
+pub fn serial_worker<T: Send + 'static>(name: &str, f: impl FnMut(T) + Send + 'static) -> std::io::Result<std::sync::mpsc::Sender<T>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new().name(name.into()).spawn(move || rx.into_iter().for_each(f))?;
+    Ok(tx)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

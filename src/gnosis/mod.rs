@@ -196,10 +196,18 @@ fn prepare_and_spawn() -> Result<(), String> {
             }
             match Core::init(config, params, target, sender).await {
                 Ok((core, to_core)) => {
+                    // ends with the forwarder below, which this run's runtime shutdown drops
+                    let to_root = match crate::pure::serial_worker("gnosis-root", move |req| apply_request(run, req)) {
+                        Ok(tx) => tx,
+                        Err(e) => {
+                            set_state(format!("init failed: root thread: {e}"));
+                            return;
+                        }
+                    };
                     *TO_CORE.lock().unwrap() = Some((run, to_core));
                     tokio::spawn(async move {
                         while let Some(CoreToWorker::RequestToRoot(req)) = from_core.recv().await {
-                            handle_request(run, req);
+                            handle_request(run, req, &to_root);
                         }
                     });
                     set_state("running");
@@ -276,27 +284,13 @@ fn with_root<T>(run: u64, f: impl FnOnce(&mut root::Root) -> T) -> Option<T> {
     }
 }
 
-fn handle_request(run: u64, req: RequestToRoot) {
+/// Ping and the kill switch answer at once; the tunnel requests go to this run's root thread, which
+/// applies them in the order the core sent them (the core relies on that order, as upstream root).
+fn handle_request(run: u64, req: RequestToRoot, to_root: &std::sync::mpsc::Sender<RequestToRoot>) {
     match req {
         RequestToRoot::KillswitchLockdown { request_id, peer_ips, .. } => {
             log::line(format!("gnosis: kill switch requested ({} peer IPs) - not enforced yet on Windows", peer_ips.len()));
             respond(run, ResponseFromRoot::KillswitchLockdown { request_id, res: Ok(()) });
-        }
-        RequestToRoot::SetupTunnel { request_id, interface_address, mtu, dns, peer_ips, blokli_ip } => {
-            // the address the worker really uses for Blokli (it may differ from our start-up lookup)
-            with_root(run, |r| r.blokli_ip = Some(blokli_ip));
-            // Blocking Win32 calls: off the runtime threads.
-            std::thread::spawn(move || {
-                let res = with_root(run, |r| r.setup_tunnel(&interface_address, mtu, dns.as_deref(), &peer_ips))
-                    .unwrap_or_else(|| Err("core is stopping".into()));
-                if let Err(e) = &res {
-                    log::line(format!("gnosis: tunnel setup failed: {e}"));
-                }
-                respond(run, ResponseFromRoot::TunnelReady { request_id, res });
-            });
-        }
-        RequestToRoot::TearDownWg => {
-            std::thread::spawn(move || with_root(run, |r| r.teardown_routes()));
         }
         RequestToRoot::Ping { request_id, options } => {
             std::thread::spawn(move || {
@@ -307,10 +301,35 @@ fn handle_request(run: u64, req: RequestToRoot) {
                 respond(run, ResponseFromRoot::Ping { request_id, res });
             });
         }
-        RequestToRoot::UpdatePeerIps { peer_ips } => {
-            std::thread::spawn(move || with_root(run, |r| r.update_peer_ips(&peer_ips)));
-        }
         RequestToRoot::ProbeStopped => {}
+        req => {
+            if to_root.send(req).is_err() {
+                log::line("gnosis: root thread is gone; tunnel request dropped");
+            }
+        }
+    }
+}
+
+/// On the root thread (blocking Win32 calls, off the runtime threads), one request at a time.
+fn apply_request(run: u64, req: RequestToRoot) {
+    match req {
+        RequestToRoot::SetupTunnel { request_id, interface_address, mtu, dns, peer_ips, blokli_ip } => {
+            // the address the worker really uses for Blokli (it may differ from our start-up lookup)
+            with_root(run, |r| r.blokli_ip = Some(blokli_ip));
+            let res = with_root(run, |r| r.setup_tunnel(&interface_address, mtu, dns.as_deref(), &peer_ips))
+                .unwrap_or_else(|| Err("core is stopping".into()));
+            if let Err(e) = &res {
+                log::line(format!("gnosis: tunnel setup failed: {e}"));
+            }
+            respond(run, ResponseFromRoot::TunnelReady { request_id, res });
+        }
+        RequestToRoot::TearDownWg => {
+            with_root(run, |r| r.teardown_routes());
+        }
+        RequestToRoot::UpdatePeerIps { peer_ips } => {
+            with_root(run, |r| r.update_peer_ips(&peer_ips));
+        }
+        _ => {}
     }
 }
 
