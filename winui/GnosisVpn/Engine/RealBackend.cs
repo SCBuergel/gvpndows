@@ -117,9 +117,10 @@ public static class ServiceCheck
 /// action stays in the UI. Numbers the core does not report (latency, load) are left neutral.</summary>
 public sealed class RealBackend
 {
-    readonly FakeEngine g;
+    readonly AppEngine g;
     // separate connections: status polls never wait behind a slow command or the balance query
-    readonly ServiceLink link = new(), cmdLink = new(), balLink = new();
+    readonly ServiceLink link = new(), cmdLink = new(), balLink = new(), logLink = new();
+    double lastForward;
     JsonNode? lastBal;
     readonly Action<Action> ui;
     string? lastMode;
@@ -127,7 +128,15 @@ public sealed class RealBackend
     readonly Dictionary<string, JsonNode?> health = new();
     string? attemptDest; bool attemptSeen; double attemptAt; int polls; double lastPollLog, pollStart, lastStuckLog; volatile string afterSend = "";
     bool polling; double lastBalance = -1e9; string? pendingConnect; double pendingAt;
+    const double PENDING_MS = 180_000;
     public string NodeAddress { get; private set; } = "";
+    /// <summary>Funds on the node and what the core asks for before it can start (wxHOPR, xDAI), while it waits for funds.</summary>
+    public double HaveWx { get; private set; }
+    public double HaveXdai { get; private set; }
+    public double NeedWx { get; private set; }
+    public double NeedXdai { get; private set; }
+    /// <summary>Size of one paid chunk of data at the current exit (MB).</summary>
+    public double ChunkMb { get; private set; } = 660;
     public string Core { get; private set; } = "connecting to the service";
     public bool ServiceUp => link.Connected;
     /// <summary>DEBUG FEATURE ONLY: the service is a test build that streams its log to the
@@ -146,11 +155,11 @@ public sealed class RealBackend
         ["BR"] = "Brazil", ["JP"] = "Japan", ["SG"] = "Singapore", ["KR"] = "South Korea", ["IN"] = "India", ["AU"] = "Australia", ["UA"] = "Ukraine", ["DK"] = "Denmark", ["NO"] = "Norway", ["BE"] = "Belgium", ["IE"] = "Ireland",
     };
 
-    public RealBackend(FakeEngine g, Action<Action> ui)
+    public RealBackend(AppEngine g, Action<Action> ui)
     {
         this.g = g; this.ui = ui;
         var S = g.S;
-        S.Gate = false; S.SyncT = 1; S.Balance = 0; S.FirstRun = false; S.Warm = false; S.Mode = "manual";
+        S.Gate = false; S.SyncT = 1; S.Balance = 0; S.Mode = "manual";
         g.EX.Clear();
     }
 
@@ -163,21 +172,29 @@ public sealed class RealBackend
     {
         if (polling)
         {
-            if (FakeEngine.Now - pollStart > 10000 && FakeEngine.Now - lastStuckLog > 10000) { lastStuckLog = FakeEngine.Now; App.Log($"poll stuck for {(FakeEngine.Now - pollStart) / 1000:0} s at step {link.Step} (poll #{polls}, after-send {afterSend})"); }
+            if (AppEngine.Now - pollStart > 10000 && AppEngine.Now - lastStuckLog > 10000) { lastStuckLog = AppEngine.Now; App.Log($"poll stuck for {(AppEngine.Now - pollStart) / 1000:0} s at step {link.Step} (poll #{polls}, after-send {afterSend})"); }
             return;
         }
-        polling = true; pollStart = FakeEngine.Now; afterSend = "send";
+        polling = true; pollStart = AppEngine.Now; afterSend = "send";
         _ = Task.Run(async () =>
         {
             try
             {
                 var st = await link.Send(new { type = "x_state" }, 5000);
                 polls++; afterSend = "got reply";
-                if (FakeEngine.Now - lastPollLog > 10000) { lastPollLog = FakeEngine.Now; App.Log($"poll #{polls}: {(st == null ? "no reply" : "mode " + (st["status"]?["data"]?["run_mode"]?["type"]?.ToString() ?? "-") + ", core " + st["core"])}"); }
-                if (st?["status"]?["data"]?["run_mode"]?["type"]?.ToString() == "running" && FakeEngine.Now - lastBalance > 15000)
+                if (AppEngine.Now - lastPollLog > 60000) { lastPollLog = AppEngine.Now; App.Log($"poll #{polls}: {(st == null ? "no reply" : "mode " + (st["status"]?["data"]?["run_mode"]?["type"]?.ToString() ?? "-") + ", core " + st["core"])}"); }
+                if (st?["status"]?["data"]?["run_mode"]?["type"]?.ToString() == "running" && AppEngine.Now - lastBalance > 15000)
                 {
-                    lastBalance = FakeEngine.Now;
+                    lastBalance = AppEngine.Now;
                     _ = Task.Run(async () => { var b = await balLink.Send(new { type = "balance" }, 60000); if (b != null) lastBal = b; });
+                }
+                // DEBUG FEATURE ONLY: the app's log goes along with the service's log stream
+                if (DebugRelay && !App.Forward.IsEmpty && AppEngine.Now - lastForward > 10000)
+                {
+                    lastForward = AppEngine.Now;
+                    var lines = new List<string>();
+                    while (lines.Count < 50 && App.Forward.TryDequeue(out var l)) lines.Add(l);
+                    _ = Task.Run(() => logLink.Send(new { type = "x_app_log", lines }, 5000, retry: false));
                 }
                 afterSend = "balance"; var bal = lastBal; lastBal = null;
                 afterSend = "dispatch";
@@ -235,6 +252,9 @@ public sealed class RealBackend
             case "preparing_safe":
                 S.SyncT = null; S.Gate = true;
                 NodeAddress = data?["run_mode"]?["node_address"]?.ToString() ?? "";
+                // what the node holds and what the core asks for (wei)
+                HaveWx = Wei(data?["run_mode"]?["node_wxhopr"]); HaveXdai = Wei(data?["run_mode"]?["node_xdai"]);
+                NeedWx = Wei(data?["run_mode"]?["balance_recommendation"]?["wxhopr"]); NeedXdai = Wei(data?["run_mode"]?["balance_recommendation"]?["xdai"]);
                 break;
             case "running":
                 S.SyncT = null; S.Gate = false;
@@ -257,13 +277,20 @@ public sealed class RealBackend
                 var x = d?["destination"]; if (x == null) continue;
                 var id = x["id"]?.ToString() ?? "?";
                 var cc = x["geo"]?["country"]?.ToString() ?? "";
-                var routable = d?["route_health"]?["state"]?["type"]?.ToString() is null or "routable";
+                var rh = d?["route_health"];
+                var routable = rh?["state"]?["type"]?.ToString() is null or "routable";
+                var walk = rh?["walk"];
+                var probe = rh?["quick_probe"];
+                var check = probe?["type"]?.ToString() == "checked" ? probe : probe?["last"];
                 var e = new Exit
                 {
                     Id = id, Country = COUNTRY.GetValueOrDefault(cc, cc == "" ? "Unknown" : cc), Place = x["meta"]?["description"]?.ToString() ?? "",
-                    Ping = 400, Rel = 2, Spots = 5, Slots = 10, Pv = routable ? 0.95 : 0.5, Fr = 3, Measured = routable, Routable = routable,
+                    Routable = routable,
+                    Measured = walk?["type"]?.ToString() == "paths",
+                    Pv = walk?["best_value"]?.GetValue<double>() ?? 0,
+                    Ping = (int)Ms(check?["status_rtt"]),
                 };
-                e.City = x["meta"]?["name"]?.ToString() ?? $"{e.Country} #{FakeEngine.Xid(id)}";
+                e.City = x["meta"]?["name"]?.ToString() ?? $"{e.Country} #{AppEngine.Xid(id)}";
                 ex.Add(e);
             }
             g.EX.Clear(); g.EX.AddRange(ex);
@@ -278,24 +305,26 @@ public sealed class RealBackend
         // checking the exit's ping and tuning the session. Show that as connected.
         if (kind == "connecting" && conn?["phase"]?["type"]?.ToString() is "verify_ping" or "adjust_to_main" or "connection_established") kind = "connected";
         var since = Ms(conn?["since"]);
-        if (pendingConnect != null && FakeEngine.Now - pendingAt > 8000) pendingConnect = null;
+        // After Connect the core first opens a probe session to the exit (about a minute) while its
+        // status still says disconnected: the app shows "Connecting" for up to 3 minutes meanwhile.
+        if (pendingConnect != null && AppEngine.Now - pendingAt > PENDING_MS) pendingConnect = null;
         switch (kind)
         {
             case "connecting":
-                if (S.Conn != "connecting") { S.CStart = FakeEngine.Now - Math.Max(0, NowMs - since); S.CDur = 30000; }
-                S.Conn = "connecting"; S.Pause = null; if (curId != null) S.Loc = curId; pendingConnect = null;
+                if (S.Conn != "connecting") { S.CStart = AppEngine.Now - Math.Max(0, NowMs - since); S.CDur = 30000; }
+                S.Conn = "connecting"; if (curId != null) S.Loc = curId; pendingConnect = null;
                 break;
             case "reconnecting":
                 S.Conn = "reconnecting"; if (curId != null) S.Loc = curId; pendingConnect = null;
                 break;
             case "connected":
                 if (S.Conn != "connected" && curId != null) S.Recent = new[] { new Recent { Id = curId, At = S.T } }.Concat(S.Recent.Where(r => r.Id != curId)).Take(6).ToList();
-                S.Conn = "connected"; S.Pause = null; if (curId != null) S.Loc = curId; pendingConnect = null;
+                S.Conn = "connected"; if (curId != null) S.Loc = curId; pendingConnect = null;
                 S.ConnSec = Math.Max(0, (NowMs - since) / 1000);
-                if (g.ExOrNull(S.Loc) is Exit cur && conn?["tunnel_ping_rtt"] is JsonNode rtt) cur.Ping = (int)Ms(rtt);
+                if (g.ExOrNull(S.Loc) is Exit cur && conn?["tunnel_ping_rtt"] is JsonNode rtt && Ms(rtt) > 0) cur.Ping = (int)Ms(rtt);
                 break;
             default:
-                if (pendingConnect == null) { if (S.Conn != "idle") { S.Conn = "idle"; S.Pause = null; } }
+                if (pendingConnect == null) { if (S.Conn != "idle") { S.Conn = "idle"; } }
                 break;
         }
 
@@ -304,7 +333,8 @@ public sealed class RealBackend
         {
             if (kind is "connecting" or "reconnecting" && curId == attemptDest) attemptSeen = true;
             else if (kind == "connected") attemptDest = null;
-            else if (kind is null or "disconnected" && pendingConnect == null && (attemptSeen || FakeEngine.Now - attemptAt > 20000))
+            // the core started connecting and dropped back, or never started within PENDING_MS
+            else if (kind is null or "disconnected" && pendingConnect == null)
             {
                 var name = g.ExOrNull(attemptDest)?.City ?? attemptDest;
                 App.Log($"backend: connect to {attemptDest} ended without a connection: {WhyNot(attemptDest)}");
@@ -320,6 +350,7 @@ public sealed class RealBackend
             var left = Ms(pix["bytes_left"]) / 1e6; var chunk = Ms(pix["chunk_bytes"]) / 1e6; var cost = Wei(pix["cost"]);
             if (left > 0) S.Alloc[curId] = left;
             if (chunk > 0 && cost > 0) mbPerWx = chunk / cost;
+            if (chunk > 0) ChunkMb = chunk;
         }
         var waiting = conn?["stall"]?["awaiting_payment_since"] != null;
         var pixPhase = pix?["phase"]?["type"]?.ToString();
@@ -348,7 +379,7 @@ public sealed class RealBackend
             : null;
         if (why != null)
         {
-            if (S.Loc == dest) { S.Conn = "idle"; S.Pause = null; }
+            if (S.Loc == dest) { S.Conn = "idle"; }
             pendingConnect = null; attemptDest = null;
             g.SetFlash("bad", $"Couldn’t connect to {name}.", why);
             return;
@@ -395,16 +426,15 @@ public sealed class RealBackend
         {
             "connect" => S.Loc,
             "pick2" => id,
-            "auto" or "bestAvail" => g.Best(S.Loc)?.Id ?? g.Best()?.Id,
-            "renew" or "sheetGo" => S.Loc,
+            "auto" => g.Best(S.Loc)?.Id ?? g.Best()?.Id,
             _ => null,
         };
         if (dest != null)
         {
             if (S.Stack.LastOrDefault() == "pick") S.Stack.RemoveAt(S.Stack.Count - 1);
-            S.Sheet = null; S.Loc = dest; S.Conn = "connecting"; S.CStart = FakeEngine.Now; S.CDur = 30000; pendingConnect = dest; pendingAt = FakeEngine.Now;
+            S.Loc = dest; S.Conn = "connecting"; S.CStart = AppEngine.Now; S.CDur = 90000; pendingConnect = dest; pendingAt = AppEngine.Now;
             if (a == "pick2" || a == "auto") S.Mode = a == "auto" ? "auto" : "manual";
-            attemptDest = dest; attemptSeen = false; attemptAt = FakeEngine.Now;
+            attemptDest = dest; attemptSeen = false; attemptAt = AppEngine.Now;
             _ = Task.Run(async () =>
             {
                 var r = await cmdLink.Send(new { type = "connect", destination = dest }, 70000, retry: false);
@@ -413,14 +443,13 @@ public sealed class RealBackend
             });
             return true;
         }
-        if (a is "disconnect" or "cancel" or "offDo")
+        if (a is "disconnect" or "cancel")
         {
             attemptDest = null;
-            S.Conn = "idle"; S.Pause = null; S.OffConfirm = false; pendingConnect = null;
+            S.Conn = "idle"; pendingConnect = null;
             _ = Task.Run(async () => { var r = await cmdLink.Send(new { type = "disconnect" }, 70000, retry: false); App.Log("service: disconnect -> " + (r?.ToJsonString() is string j ? j[..Math.Min(200, j.Length)] : "no reply")); });
             return true;
         }
-        // demo-only actions make no sense against a real node
-        return a is "preset" or "bal" or "sess" or "evOffline" or "evDrop" or "evPay" or "evUpdate" or "evTwo" or "skip" or "speed" or "gatePaid" or "syncSkip" or "failShow" or "gateRestart" or "restart" or "reset";
+        return false;
     }
 }

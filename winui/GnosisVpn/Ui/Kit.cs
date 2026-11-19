@@ -12,7 +12,7 @@ using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.UI;
-using static GnosisVpn.Engine.FakeEngine;
+using static GnosisVpn.Engine.AppEngine;
 
 namespace GnosisVpn.Ui;
 
@@ -110,7 +110,7 @@ public static class Kit
     }
     public static T Tip<T>(T el, string? tip) where T : DependencyObject { if (!string.IsNullOrEmpty(tip)) ToolTipService.SetToolTip(el, tip); return el; }
 
-    /// <summary>Buttons: kind contains accent | subtle | hyper | lg | sm | proto.</summary>
+    /// <summary>Buttons: kind contains accent | subtle | hyper | lg | sm.</summary>
     public static ButtonBase Btn(string label, Action? click, string kind = "", string? icon = null, string? trail = null, bool disabled = false, string? tip = null)
     {
         bool lg = kind.Contains("lg"), sm = kind.Contains("sm");
@@ -118,7 +118,7 @@ public static class Kit
         double isz = lg ? 18 : 16;
         Brush? fg = kind.Contains("accent") ? Theme.Br("on-accent") : kind.Contains("hyper") ? Theme.Br("accent-t") : null;
         if (icon != null) content.Children.Add(Icons.Icon(icon, isz, fg ?? (disabled ? Theme.Br("text-dis") : null)));
-        if (!string.IsNullOrEmpty(label)) content.Children.Add(new TextBlock { Text = label, FontSize = sm ? 13 : kind.Contains("proto") ? 12 : 14, FontWeight = lg ? FontWeights.SemiBold : FontWeights.Normal, VerticalAlignment = VerticalAlignment.Center });
+        if (!string.IsNullOrEmpty(label)) content.Children.Add(new TextBlock { Text = label, FontSize = sm ? 13 : 14, FontWeight = lg ? FontWeights.SemiBold : FontWeights.Normal, VerticalAlignment = VerticalAlignment.Center });
         if (trail != null) content.Children.Add(Icons.Icon(trail, 16, fg));
         ButtonBase b;
         if (kind.Contains("hyper"))
@@ -128,7 +128,6 @@ public static class Kit
             var bt = new Button { Content = content };
             if (kind.Contains("accent")) bt.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
             if (kind.Contains("subtle")) { bt.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent); bt.BorderThickness = new Thickness(0); }
-            if (kind.Contains("proto")) { bt.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent); bt.BorderBrush = Theme.Br("stroke-2"); bt.Foreground = Theme.Br("text-2"); }
             b = bt;
         }
         if (lg) { b.MinHeight = 40; b.MinWidth = 200; b.Padding = T(20, 8, 20, 8); }
@@ -157,7 +156,7 @@ public static class Kit
     }
 
     /// <summary>Signal bars for an exit's grade (bars() in common.js); chk = the "checking" animation.</summary>
-    public static FrameworkElement Bars(FakeEngine g, Exit e, bool chk = false)
+    public static FrameworkElement Bars(AppEngine g, Exit e, bool chk = false)
     {
         var p = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Height = 12, VerticalAlignment = VerticalAlignment.Center };
         var gr = g.GradeOf(e);
@@ -178,7 +177,7 @@ public static class Kit
     }
 
     /// <summary>The quality line: weak routes in red (qline() in common.js).</summary>
-    public static TextBlock QLine(FakeEngine g, Exit e)
+    public static TextBlock QLine(AppEngine g, Exit e)
     {
         var gr = g.GradeOf(e);
         return Txt(gr.Label, 12, gr.K == "weak" ? "sev-bad" : "text-2");

@@ -1,12 +1,10 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Threading.Tasks;
 using GnosisVpn.Ui;
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Graphics.Imaging;
@@ -15,19 +13,15 @@ using Windows.Storage.Streams;
 namespace GnosisVpn.Testing;
 
 /// <summary>
-/// Deep links and test screenshots (debug harness).
-///   GnosisVPN.exe --hash s07-d-pick-dark            open in that state (same tokens as the prototype)
-///   GnosisVPN.exe --shots LIST.txt OUTDIR            one PNG per line "name hash [WxH]", then exit
-/// Each shot starts from a fresh engine (like a page load of the prototype), applies the deep link,
-/// lays the window out at the size (default 1180x650), waits, and renders the window plus any open
-/// dialog or flyout (popups) to a PNG with RenderTargetBitmap: EC2's display is only 800x600, so
-/// the capture comes from the XAML tree, not from the screen.
+/// Test drivers for the real app on a test machine (they act on the live service like a user would):
+///   --snap DIR                    a screenshot every 10 s plus a line of state in DIR/snap.log
+///   --click-connect QUERY         clicks Connect on the first exit whose name contains QUERY
+///   --click-disconnect-after N    ... and Disconnect N seconds after it is connected
+///   --act NAME                    runs the UI action NAME once the service has answered (e.g. gateDirect)
+/// Screenshots come from the XAML tree (RenderTargetBitmap plus open popups), not from the screen.
 /// </summary>
 public static class Shots
 {
-    public static bool Active;
-    static readonly Dictionary<string, (int w, int h)> SIZES = new() { ["wide"] = (1180, 650), ["std"] = (960, 640), ["compact"] = (720, 620), ["narrow"] = (520, 640), ["max"] = (1366, 720) };
-
     static string? Arg(string name)
     {
         var a = Environment.GetCommandLineArgs();
@@ -35,83 +29,20 @@ public static class Shots
         return i >= 0 && i + 1 < a.Length ? a[i + 1] : null;
     }
 
-    /// <summary>applyHash() in common.js, plus the Windows tokens (PF.hash in ui.js).</summary>
-    public static (int w, int h)? Apply(MainWindow w, string hash)
+    public static Task RunIfRequested(MainWindow w)
     {
-        var G = w.G; var S = G.S; (int, int)? size = null;
-        var presets = new HashSet<string> { "s00", "s01", "s07", "s08", "s10", "s13", "s14", "s18c", "l1", "arc" };
-        var pagesMap = new Dictionary<string, string> { ["pick"] = "pick", ["set"] = "settings", ["add"] = "add", ["payout"] = "payout", ["direct"] = "direct", ["traffic"] = "traffic", ["demo"] = "demo" };
-        foreach (var p in hash.TrimStart('#').ToLowerInvariant().Split('-', StringSplitOptions.RemoveEmptyEntries))
-        {
-            S = G.S;
-            if (presets.Contains(p)) { S.Gate = false; G.Preset(p); }
-            else if (p == "i1") G.Act("gateRestart");
-            else if (p == "i0") { S.Gate = false; G.Act("restart"); }
-            else if (p == "e1") { S.Gate = false; G.Act("failShow"); }
-            else if (p == "d") { S.Simple = false; S.Details = true; }
-            else if (p == "simple") { S.Simple = true; S.Details = false; }
-            else if (p is "dark" or "light") w.U.Mode = p;
-            else if (pagesMap.TryGetValue(p, out var pg)) G.Go(pg);
-            else if (p == "usage") { G.Go("settings"); S.Stab = "usage"; }
-            else if (p == "balance") S.Sheet = new Engine.Sheet { Type = "balance" };
-            else if (p == "off") S.OffConfirm = true;
-            else if (p == "codes") w.U.Codes = true;
-            else if (p == "x60") S.Speed = 60;
-            else if (p == "connect") G.Act("connect");
-            else if (p == "static") Anim.Off = true;
-            else if (p is "tray" or "menu" or "nc") w.U.Fly = p == "menu" ? "ctx" : p;
-            else if (p == "closed") w.U.WinState = "closed";
-            else if (p == "quit") w.U.WinState = "quit";
-            else if (SIZES.TryGetValue(p, out var z)) size = z;
-            else if (p == "closewin") { var t = w.DispatcherQueue.CreateTimer(); t.Interval = TimeSpan.FromSeconds(2); t.IsRepeating = false; MainWindow.Pending.Add(t); t.Tick += (_, _) => { MainWindow.Pending.Remove(t); w.Close(); }; t.Start(); }
-            else if (p == "traymenu") { var t = w.DispatcherQueue.CreateTimer(); t.Interval = TimeSpan.FromSeconds(3); t.IsRepeating = false; MainWindow.Pending.Add(t); t.Tick += (_, _) => { MainWindow.Pending.Remove(t); Tray.OpenMenuAtIcon(); }; t.Start(); }
-            else if (p == "trayfly") w.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => Tray.OpenFlyout(w));
-        }
-        w.Render();
-        return size;
-    }
-
-    public static async Task RunIfRequested(MainWindow w)
-    {
-        if (Arg("--hash") is string h) { var sz = Apply(w, h); if (sz != null) w.SetSize(sz.Value.w, sz.Value.h); }
-        // real-service tests: periodic window captures, and one connect as a click would do it
         if (Arg("--snap") is string snapDir) _ = Snapper(w, snapDir);
         if (Arg("--click-connect") is string q) _ = ClickConnect(w, q.ToLowerInvariant());
-        var list = Arg("--shots"); var outDir = Arg("--shots") is string ? Environment.GetCommandLineArgs().SkipWhile(a => a != "--shots").Skip(2).FirstOrDefault() : null;
-        if (list == null || outDir == null) return;
-        Active = true;
-        WindowSizer.AllowLarge(WinRT.Interop.WindowNative.GetWindowHandle(w));
-        w.AppWindow.Move(new Windows.Graphics.PointInt32(0, 0));
-        Directory.CreateDirectory(outDir);
-        var log = new List<string>();
-        foreach (var raw in File.ReadAllLines(list))
-        {
-            var parts = raw.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length < 2 || raw.StartsWith("#")) continue;
-            var (name, hash) = (parts[0], parts[1]);
-            try
-            {
-                Anim.Off = false;
-                w.ResetForShot();
-                var size = Apply(w, hash) ?? (1180, 650);
-                if (parts.Length > 2 && parts[2].Split('x') is [var a, var b]) size = (int.Parse(a), int.Parse(b));
-                w.SetSize(size.Item1, size.Item2);
-                await Task.Delay(900);
-                w.Render();
-                await Task.Delay(700);
-                if (w.U.WinState == "closed") { log.Add($"skip {name}: window closed to the notification area (desktop screenshot covers it)"); continue; }
-                var cap = Capture(w, Path.Combine(outDir, name + ".png"));
-                if (await Task.WhenAny(cap, Task.Delay(20000)) != cap) { log.Add($"FAIL {name}: capture did not finish in 20 s (is the session locked or the display off?)"); File.WriteAllLines(Path.Combine(outDir, "shots.log"), log); continue; }
-                await cap;
-                var pops = VisualTreeHelper.GetOpenPopupsForXamlRoot(w.RootElement.XamlRoot);
-                var pinfo = string.Join(",", pops.Select(pp => $"{pp.Child?.GetType().Name}:{(pp.Child as FrameworkElement)?.ActualWidth:0}x{(pp.Child as FrameworkElement)?.ActualHeight:0}"));
-                log.Add($"ok {name} {size.Item1}x{size.Item2} code={Engine.Messages.ScreenCode(w.G, w.U.Fly, w.U.WinState).Code} dialog={(Dialogs.Open != null)} popups=[{pinfo}]");
-            }
-            catch (Exception e) { log.Add($"FAIL {name}: {e}"); }
-            File.WriteAllLines(Path.Combine(outDir, "shots.log"), log);   // after every shot: a hang shows where
-        }
-        File.WriteAllLines(Path.Combine(outDir, "shots.log"), log);
-        w.Quit();
+        if (Arg("--act") is string act) _ = ActWhenReady(w, act);
+        return Task.CompletedTask;
+    }
+
+    static async Task ActWhenReady(MainWindow w, string act)
+    {
+        for (int i = 0; i < 300 && (w.G.S.Fail != null || w.G.S.SyncT != null || w.G.Real.Core == "connecting to the service"); i++) await Task.Delay(1000);
+        await Task.Delay(3000);
+        App.Log($"test: action {act}");
+        w.G.Act(act);
     }
 
     static async Task Snapper(MainWindow w, string dir)
@@ -121,7 +52,7 @@ public static class Shots
         {
             await Task.Delay(10000);
             try { var c = Capture(w, Path.Combine(dir, $"snap-{i:D3}.png")); if (await Task.WhenAny(c, Task.Delay(15000)) == c) await c; } catch (Exception e) { App.Log("snap: " + e.Message); }
-            File.AppendAllText(Path.Combine(dir, "snap.log"), $"{DateTime.UtcNow:HH:mm:ss} {i:D3} conn={w.G.S.Conn} loc={w.G.S.Loc} core={w.G.Real?.Core} code={Engine.Messages.ScreenCode(w.G).Code}{Environment.NewLine}");
+            File.AppendAllText(Path.Combine(dir, "snap.log"), $"{DateTime.UtcNow:HH:mm:ss} {i:D3} conn={w.G.S.Conn} loc={w.G.S.Loc} core={w.G.Real.Core} code={Engine.Messages.ScreenCode(w.G)}{Environment.NewLine}");
         }
     }
 

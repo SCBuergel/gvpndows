@@ -239,6 +239,18 @@ fn handle(line: &str) -> String {
             Err(e) => serde_json::json!({ "error": e }).to_string(),
         },
         PipeRoute::SendLog => send_log_now(),
+        // DEBUG FEATURE ONLY: the app's log joins the service log (and with it the log stream);
+        // release builds accept and drop it
+        PipeRoute::AppLog => {
+            if crate::relay::ACTIVE {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                    for l in crate::pure::app_log_lines(&v) {
+                        log::line(l);
+                    }
+                }
+            }
+            serde_json::json!({ "ok": true }).to_string()
+        }
         PipeRoute::Command => match gnosis::command(line) {
             Ok(r) => r.to_string(),
             Err(e) => serde_json::json!({ "error": e }).to_string(),

@@ -9,7 +9,7 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.Windows.AppNotifications;
 using Microsoft.Windows.AppNotifications.Builder;
-using static GnosisVpn.Engine.FakeEngine;
+using static GnosisVpn.Engine.AppEngine;
 using static GnosisVpn.Ui.Kit;
 
 namespace GnosisVpn.Ui;
@@ -22,12 +22,12 @@ public static class Tray
     static NotifyIconNative? icon;
     static TrayFlyoutWindow? fly;
 
-    public static string State(FakeEngine g) => g.S.Conn switch { "connected" => "ok", "paused" => "bad", "idle" => "off", _ => "warn" };
-    static string StatusTxt(FakeEngine g) => g.S.Conn switch { "idle" => "Not connected", "connecting" => "Connecting", "connected" => "Connected", "reconnecting" => "Reconnecting", _ => "Paused" };
+    public static string State(AppEngine g) => g.S.Conn switch { "connected" => "ok", "idle" => "off", _ => "warn" };
+    static string StatusTxt(AppEngine g) => g.S.Conn switch { "connecting" => "Connecting", "connected" => "Connected", "reconnecting" => "Reconnecting", _ => "Not connected" };
 
     public static void Sync(MainWindow w)
     {
-        if (Testing.Shots.Active || w.U.WinState == "quit") return;
+        if (w.U.WinState == "quit") return;
         try
         {
             if (icon == null)
@@ -84,19 +84,18 @@ public static class Tray
 
     public static void Dispose() { try { fly?.Close(); icon?.Dispose(); } catch { } icon = null; }
 
-    /// <summary>The flyout content (trayFly() in ui.js); also used for the TRAY screenshot.</summary>
+    /// <summary>The notification-area flyout's content.</summary>
     public static UIElement FlyoutContent(MainWindow w, Action close)
     {
         var G = w.G; var S = G.S; var e = G.Ex(S.Loc); var c = S.Conn; var g = G.GradeOf(e);
         void A(string a) { G.Act(a); }
-        ButtonBase main = c == "idle" ? Btn(G.ConnLbl, () => { A("connect"); close(); }, "accent", "power_settings_new")
-            : c == "paused" ? Btn(S.Pause switch { "nodata" => "Renew · 600 MB", "offline" => "Best available", "balance" => "Add data", _ => "Retry" }, () => { close(); w.ShowWindow(); A(S.Pause switch { "nodata" => "renew", "offline" => "bestAvail", "balance" => S.Lockdown ? "payOut" : "addData", _ => "renew" }); }, "accent")
+        ButtonBase main = c == "idle" ? Btn("Connect", () => { A("connect"); close(); }, "accent", "power_settings_new")
             : Btn("Disconnect", () => A(c == "connecting" ? "cancel" : "disconnect"), "", "power_settings_new");
         main.HorizontalAlignment = HorizontalAlignment.Stretch;
         var head = new Grid();
         head.Children.Add(HS(10, AppIcon(24), Txt("Gnosis VPN", 14, bold: true)));
         var set = IconBtn("settings", "Settings", () => { close(); w.ShowWindow(); A("settings"); }); set.HorizontalAlignment = HorizontalAlignment.Right; head.Children.Add(set);
-        var dot = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 10, Height = 10, Fill = Theme.Br(c == "connected" ? "sync" : c == "paused" ? "sev-bad" : c == "idle" ? "text-3" : "sev-warn"), VerticalAlignment = VerticalAlignment.Center };
+        var dot = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 10, Height = 10, Fill = Theme.Br(c == "connected" ? "sync" : c == "idle" ? "text-3" : "sev-warn"), VerticalAlignment = VerticalAlignment.Center };
         if (c is "connecting" or "reconnecting") Anim.Pulse(dot, 1, .3, .5);
         var st = new Grid();
         st.Children.Add(HS(10, dot, Txt(StatusTxt(G), 16, bold: true)));
@@ -167,7 +166,7 @@ public static class Notify
     public static void Init(MainWindow w)
     {
         win = w;
-        if (registered || Testing.Shots.Active) return;
+        if (registered) return;
         try
         {
             AppNotificationManager.Default.NotificationInvoked += (_, args) =>
@@ -182,23 +181,9 @@ public static class Notify
         catch (Exception e) { App.Log("toasts: " + e.Message); }
     }
 
-    public static void Toast(MainWindow w, Note n)
-    {
-        if (n.Silent || w.U.WinState == "quit" || Testing.Shots.Active) return;
-        Init(w);
-        try
-        {
-            var b = new AppNotificationBuilder().AddArgument("act", "open").AddText(n.Title).AddText(n.Body);
-            foreach (var x in n.Acts.Where(x => x.Act != "nclose")) b.AddButton(new AppNotificationButton(x.Label).AddArgument("act", x.Act));
-            AppNotificationManager.Default.Show(b.BuildNotification());
-        }
-        catch (Exception e) { App.Log("toast: " + e.Message); }
-    }
-
     public static void SystemNote(MainWindow w, string title, string body)
     {
-        if (Testing.Shots.Active) return;
-        Init(w);
+                Init(w);
         try { AppNotificationManager.Default.Show(new AppNotificationBuilder().AddArgument("act", "open").AddText(title).AddText(body).BuildNotification()); }
         catch (Exception e) { App.Log("toast: " + e.Message); }
     }
@@ -237,8 +222,7 @@ public static class Prefs
     public static string? Get(string k) => All().TryGetValue(k, out var v) ? v : null;
     public static void Save(string k, string v)
     {
-        if (Testing.Shots.Active) return;
-        All()[k] = v;
+                All()[k] = v;
         try { Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!); File.WriteAllText(FilePath, System.Text.Json.JsonSerializer.Serialize(cache)); } catch { }
     }
 }

@@ -10,27 +10,25 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
-using static GnosisVpn.Engine.FakeEngine;
+using static GnosisVpn.Engine.AppEngine;
 using static GnosisVpn.Ui.Kit;
 
 namespace GnosisVpn;
 
-/// <summary>UI-only state (U in the prototype): theme, panels, window and notification-area settings.</summary>
+/// <summary>UI-only state: theme, panels, window and notification-area settings.</summary>
 public sealed class UiState
 {
     public string Mode = "system";          // app theme: system | light | dark
-    public bool Codes, Rules = true, MoreMsgs, VizMb;
-    public string CtlTab = "scenario";
-    public string? Dialog;                  // "upload"
+    public bool MoreMsgs, VizMb;
     public bool KeepTray = true, StartWin = true, StartMin;
     public string WinState = "open";        // open | min | closed | quit
     public bool Hinted;
-    public string? Fly;                     // tray | ctx | nc (system flyouts, simulated in screenshots only)
 }
 
 public sealed partial class MainWindow : Window
 {
-    public readonly FakeEngine G = new();
+    public readonly AppEngine G = new();
+    /// <summary>The Gnosis VPN service's state, polled through its pipe (the only backend).</summary>
     public readonly UiState U = new();
     public State S => G.S;
     readonly Pages pages;
@@ -38,8 +36,6 @@ public sealed partial class MainWindow : Window
     readonly List<(string key, object el)> live = new();
     string curSig = "", curSoloSig = "";
     Microsoft.UI.Dispatching.DispatcherQueueTimer? tickTimer, relayTimer;
-    /// <summary>One-shot timers that have not fired yet (kept alive until they do).</summary>
-    public static readonly HashSet<Microsoft.UI.Dispatching.DispatcherQueueTimer> Pending = new();
     bool rendering;
 
     public MainWindow()
@@ -55,26 +51,14 @@ public sealed partial class MainWindow : Window
         U.Mode = Prefs.Get("mode") ?? "system";
         U.StartWin = Prefs.Get("startWin") != "0"; U.StartMin = Prefs.Get("startMin") == "1";
 
-        G.SetTimeout = (ms, a) =>
-        {
-            var t = dq.CreateTimer(); t.Interval = TimeSpan.FromMilliseconds(Math.Max(1, ms)); t.IsRepeating = false;
-            Pending.Add(t);   // referenced until it fires: an unreferenced timer can be collected and never fire
-            t.Tick += (_, _) => { t.Stop(); Pending.Remove(t); a(); };
-            t.Start();
-        };
         G.Render += () => Render();
         G.Snack += msg => ShowSnack(msg);
-        G.HeadsUp += n => Notify.Toast(this, n);
         G.OpenUrl += url => _ = Windows.System.Launcher.LaunchUriAsync(new Uri(url));
-        G.SyncEnd += _ => { };
 
-        // the real Gnosis VPN service when it runs (its pipe exists); --fake forces the demo backend
-        var args = Environment.GetCommandLineArgs();
-        if (!args.Contains("--fake") && !args.Contains("--shots") && (args.Contains("--real") || System.IO.File.Exists(@"\\.\pipe\gnosisvpn")))
-        {
-            G.Real = new RealBackend(G, a => dq.TryEnqueue(() => a()));
-            App.Log("backend: Gnosis VPN service");
-        }
+        // the Gnosis VPN service is the only backend: until its pipe answers, the app shows
+        // "Can't reach the Gnosis VPN service" and keeps polling (it starts with Windows, delayed)
+        G.Real = new RealBackend(G, a => dq.TryEnqueue(() => a()));
+        App.Log("backend: Gnosis VPN service");
         // Fields, not locals: a DispatcherQueueTimer nothing references is garbage-collected and stops
         // firing. The tick drives the service polling; losing it froze the app on "Discovering the network".
         tickTimer = dq.CreateTimer(); tickTimer.Interval = TimeSpan.FromMilliseconds(250); tickTimer.Tick += (_, _) => G.Tick(); tickTimer.Start();
@@ -95,23 +79,6 @@ public sealed partial class MainWindow : Window
         Render();
     }
 
-    // ---------- window sizes (Demo controls → Windows, and the screenshot harness) ----------
-    static readonly Dictionary<string, (int w, int h)> WSIZES = new() { ["wide"] = (1180, 650), ["std"] = (960, 640), ["compact"] = (720, 620), ["narrow"] = (520, 640) };
-    public string? WinPreset()
-    {
-        if (AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter { State: Microsoft.UI.Windowing.OverlappedPresenterState.Maximized }) return "max";
-        var sz = AppWindow.Size; var sc = Root.XamlRoot?.RasterizationScale ?? 1;
-        foreach (var (k, v) in WSIZES) if (Math.Abs(sz.Width / sc - v.w) < 4 && Math.Abs(sz.Height / sc - v.h) < 4) return k;
-        return null;
-    }
-    public void SetWin(string k)
-    {
-        if (k == "max") { (AppWindow.Presenter as Microsoft.UI.Windowing.OverlappedPresenter)?.Maximize(); return; }
-        (AppWindow.Presenter as Microsoft.UI.Windowing.OverlappedPresenter)?.Restore();
-        var (ww, hh) = WSIZES[k]; var sc = Root.XamlRoot?.RasterizationScale ?? 1;
-        AppWindow.Resize(new Windows.Graphics.SizeInt32((int)(ww * sc), (int)(hh * sc)));
-        Render();
-    }
     [System.Runtime.InteropServices.DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr hwnd);
 
     /// <summary>Opens at w × h effective pixels (the display's scaling applied), but never larger than
@@ -133,26 +100,19 @@ public sealed partial class MainWindow : Window
         Root.HorizontalAlignment = HorizontalAlignment.Left; Root.VerticalAlignment = VerticalAlignment.Top;
         curSig = ""; Render();
     }
-    public void ResetForShot()
-    {
-        Dialogs.Reset(); G.Reload(); U.Mode = "system"; U.Codes = false; U.MoreMsgs = false; U.Fly = null; U.WinState = "open"; U.Dialog = null; U.CtlTab = "scenario";
-        curSig = ""; curSoloSig = "";
-    }
-
-
     // ---------- navigation (route() / navTo() in ui.js) ----------
     public string Route()
     {
-        var st = S.Stack.Where(p => p != "payout").ToList();
+        var st = S.Stack;
         var top = st.Count > 0 ? st[^1] : null;
         if (top == null) return "home";
         if (top == "pick") return "locations";
-        if (top == "settings") return S.Stab == "usage" ? "balance" : "settings";
+        if (top == "settings") return "settings";
         if (top == "add") return "balance";
-        return top;   // direct, traffic, demo
+        return top;   // direct, traffic
     }
     public string BaseKey() => S.Fail != null ? "fail" : S.Gate ? "gate" : S.SyncT != null ? "sync" : "home";
-    bool CanBack() => S.Stack.Any(p => p != "payout");
+    bool CanBack() => S.Stack.Count > 0;
 
     public void NavTo(string k)
     {
@@ -166,17 +126,13 @@ public sealed partial class MainWindow : Window
             _ => new() { k },
         };
         if (k == "locations") S.Pall = false;
-        if (k == "settings") S.Stab = "general";
         Render();
     }
 
     public void GoBack()
     {
-        if (S.Sheet?.Type == "balance") { S.Sheet = null; Render(); return; }
-        if (S.OffConfirm) { G.Act("offCancel"); return; }
-        if (U.Dialog != null) { U.Dialog = null; Render(); return; }
-        if (S.Sheet != null && !(S.Sheet.Type == "quota" && G.Page != null)) { G.Act("sheetNo"); return; }
-        if (CanBack() || G.Page == "payout") G.Act("back");
+        if (S.BalanceOpen) { S.BalanceOpen = false; Render(); return; }
+        if (CanBack()) G.Act("back");
     }
 
     readonly Dictionary<string, NavigationViewItem> navItems = new();
@@ -191,7 +147,6 @@ public sealed partial class MainWindow : Window
         Nav.MenuItems.Add(Item("locations", "location", "Locations"));
         Nav.MenuItems.Add(Item("traffic", "public", "Live traffic"));
         Nav.MenuItems.Add(Item("balance", "account_balance_wallet", "Balance"));
-        Nav.FooterMenuItems.Add(Item("demo", "beaker", "Demo controls"));
         Nav.FooterMenuItems.Add(Item("settings", "settings", "Settings"));
     }
 
@@ -205,13 +160,11 @@ public sealed partial class MainWindow : Window
             if (on && !ReferenceEquals(Nav.SelectedItem, it)) Nav.SelectedItem = it;
             string? badge = k switch
             {
-                "home" => S.Conn == "connected" ? "sync" : S.Conn == "paused" ? "sev-bad" : S.Conn is "connecting" or "reconnecting" ? "sev-warn" : null,
-                "balance" => S.Balance <= COST ? (S.Balance < COST ? "sev-bad" : "sev-warn") : null,
-                "settings" => S.Update != null ? "sev-info" : null,
+                "home" => S.Conn == "connected" ? "sync" : S.Conn is "connecting" or "reconnecting" ? "sev-warn" : null,
                 _ => null,
             };
             it.InfoBadge = badge == null ? null : new InfoBadge { Background = Theme.Br(badge), Width = 8, Height = 8, MinWidth = 8, Padding = new Thickness(0) };
-            it.Icon = Icons.PathIcon(it.Tag is "home" ? "home" : k == "locations" ? "location" : k == "traffic" ? "public" : k == "balance" ? "account_balance_wallet" : k == "demo" ? "beaker" : "settings", on);
+            it.Icon = Icons.PathIcon(it.Tag is "home" ? "home" : k == "locations" ? "location" : k == "traffic" ? "public" : k == "balance" ? "account_balance_wallet" : "settings", on);
         }
     }
 
@@ -235,21 +188,16 @@ public sealed partial class MainWindow : Window
         {
             "timer" => Hms(S.ConnSec),
             "left" => Math.Round(G.Left()) + " MB",
-            "clock" => G.ClockText,
-            "retry" => "0:" + P2(Math.Max(0, S.RetryAt - S.T)),
-            "chk" => Math.Max(1, Math.Floor(S.T % 30)) + " s ago",
-            "ckt" => S.Sheet is { Check: true } ? $"{(int)(Math.Max(0, S.Sheet.Until - S.T) / 60)}:{P2(Math.Max(0, S.Sheet.Until - S.T) % 60)}" : null,
-            "tleft" => G.Left() > 0 ? "Time remaining " + Dur(G.IsOn ? Math.Min(G.MinsLeft(), (int)Math.Max(0, Math.Round((10800 - S.ConnSec) / 60))) : G.MinsLeft()) : "—",
-            "sypct" => S.SyncT is double t1 ? (Math.Min(SYNC_LEN, t1) / SYNC_LEN * 100).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "%" : null,
+            "sypct" => S.SyncT is double t1 ? (Math.Min(SoloScreens.SYNC_LEN, t1) / SoloScreens.SYNC_LEN * 100).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "%" : null,
             "systep" => S.SyncT is double t2 ? SoloScreens.SyncStep(t2) : null,
             "core" => G.Real?.Core,
             _ => null,
         };
         double? Num(string k) => k switch
         {
-            "meter" => Math.Min(100, G.Left() / 6),
+            "meter" => Math.Min(100, G.Left() / Math.Max(1, G.Real.ChunkMb) * 100),
             "cprog" => S.Conn == "connecting" ? Math.Min(100, (Now - S.CStart) / Math.Max(1, S.CDur) * 100) : null,
-            "sybar" => S.SyncT is double t ? Math.Min(SYNC_LEN, t) / SYNC_LEN * 100 : null,
+            "sybar" => S.SyncT is double t ? Math.Min(SoloScreens.SYNC_LEN, t) / SoloScreens.SYNC_LEN * 100 : null,
             _ => null,
         };
         foreach (var (k, el) in live)
@@ -258,13 +206,7 @@ public sealed partial class MainWindow : Window
             else if (el is ProgressBar pb) { var v = Num(k); if (v != null) pb.Value = v.Value; }
             else if (el is Microsoft.UI.Xaml.Documents.Run run) { var v = Val(k); if (v != null && run.Text != v) run.Text = v; }
         }
-        if (S.Sheet is { Check: true } && dialogCheckTimer != null)
-            dialogCheckTimer.Foreground = Theme.Br(S.Sheet.Until - S.T < 60 ? "sev-bad" : "text");
     }
-    public TextBlock? dialogCheckTimer;
-
-    /// <summary>Replace the live token {retry} in message text with the current value.</summary>
-    public string LiveText(string s) => s.Replace("{retry}", "0:" + P2(Math.Max(0, S.RetryAt - S.T)));
 
     // ---------- render ----------
     public void Render()
@@ -318,7 +260,7 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            var sig = $"{Theme.Dark}|{bk}|{G.Page}|{S.Pay != null}|{S.Fail?.Code}";
+            var sig = $"{Theme.Dark}|{bk}|{G.Page}|{S.Fail?.Code}|{S.Fail?.Title}|{G.Real.NeedWx}|{G.Real.NodeAddress}";
             if (sig != curSoloSig)
             {
                 live.Clear();
@@ -326,41 +268,9 @@ public sealed partial class MainWindow : Window
                 curSoloSig = sig;
             }
         }
-        Dialogs.Sync(this);
         SyncBalanceFlyout();
-        Codes.Visibility = U.Codes ? Visibility.Visible : Visibility.Collapsed;
-        if (U.Codes)
-        {
-            var (code, name) = Messages.ScreenCode(G, U.Fly, U.WinState);
-            Codes.Background = Theme.Br("text");
-            Codes.Child = new TextBlock { FontSize = 11, Foreground = Theme.Br("layer"), Text = $"{code} {name}" };
-        }
         Tray.Sync(this);
-        if (Testing.Shots.Active) ShotStandIns();
         UpdateLive();
-    }
-
-    // ---------- screenshot stand-ins for the notification-area flyout and menu (#tray, #menu) ----------
-    Microsoft.UI.Xaml.Controls.Primitives.Popup? standIn; MenuFlyout? standMenu; string? standKey;
-    void ShotStandIns()
-    {
-        var key = U.Fly;
-        if (key == standKey) return;
-        standKey = key;
-        if (standIn != null) { standIn.IsOpen = false; standIn = null; }
-        if (standMenu != null) { standMenu.Hide(); standMenu = null; }
-        if (key == "tray")
-        {
-            var content = new Border { Background = Theme.Br("flyout"), BorderBrush = Theme.Br("stroke-2"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Child = Tray.FlyoutContent(this, () => { }) };
-            standIn = new Microsoft.UI.Xaml.Controls.Primitives.Popup { XamlRoot = Root.XamlRoot, Child = content, HorizontalOffset = Math.Max(0, Root.ActualWidth - 360), VerticalOffset = Math.Max(0, Root.ActualHeight - 320) };
-            content.RequestedTheme = Root.ActualTheme;
-            standIn.IsOpen = true;
-        }
-        else if (key == "ctx")
-        {
-            standMenu = Tray.MenuFor(this);
-            standMenu.ShowAt(Root, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions { Position = new Windows.Foundation.Point(Math.Max(0, Root.ActualWidth - 260), Math.Max(0, Root.ActualHeight - 240)) });
-        }
     }
 
     // ---------- title bar balance button + flyout ----------
@@ -368,24 +278,23 @@ public sealed partial class MainWindow : Window
     Flyout? balFly;
     FrameworkElement BalanceButton()
     {
-        var meter = new ProgressBar { Width = 36, Height = 3, MinHeight = 3, Value = Math.Min(100, S.Balance / (COST * 8) * 100), Maximum = 100, Foreground = Theme.Br("accent"), Background = Theme.Br("track"), VerticalAlignment = VerticalAlignment.Center };
         balBtn = new Button
         {
             Height = 32, Padding = T(10, 0, 10, 0),
-            Content = HS(8, Icons.Icon("account_balance_wallet", 16), Mono(Mb(S.Balance), 12), meter),
+            Content = HS(8, Icons.Icon("account_balance_wallet", 16), Mono(Mb(S.Balance), 12)),
         };
         Tip(balBtn, $"Balance {Mb(S.Balance)}");
-        balBtn.Click += (_, _) => { S.Sheet = S.Sheet?.Type == "balance" ? null : new Sheet { Type = "balance" }; Render(); };
+        balBtn.Click += (_, _) => { S.BalanceOpen = !S.BalanceOpen; Render(); };
         return balBtn;
     }
 
     void SyncBalanceFlyout()
     {
-        bool want = S.Sheet?.Type == "balance" && BaseKey() == "home";
+        bool want = S.BalanceOpen && BaseKey() == "home";
         if (want && balFly == null)
         {
             balFly = new Flyout { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedRight, Content = pages.BalanceFlyout() };
-            balFly.Closed += (_, _) => { balFly = null; if (S.Sheet?.Type == "balance") { S.Sheet = null; Render(); } };
+            balFly.Closed += (_, _) => { balFly = null; if (S.BalanceOpen) { S.BalanceOpen = false; Render(); } };
             if (balBtn != null && balBtn.XamlRoot != null) balFly.ShowAt(balBtn);
             else balFly.ShowAt(Root, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions { Position = new Windows.Foundation.Point(Math.Max(320, Root.ActualWidth - 150), 46), Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedRight });
         }
@@ -437,7 +346,7 @@ public sealed partial class MainWindow : Window
             }
             Render();
         }
-        else { S.Conn = "idle"; Tray.Dispose(); }
+        else Tray.Dispose();
     }
 
     public void ShowWindow()
@@ -451,7 +360,6 @@ public sealed partial class MainWindow : Window
     public void Quit()
     {
         Quitting = true;
-        S.Conn = "idle"; S.Pause = null; S.CTok = null;
         Tray.Dispose();
         Close();
         Application.Current.Exit();

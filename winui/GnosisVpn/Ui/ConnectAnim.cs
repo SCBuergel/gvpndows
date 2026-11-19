@@ -64,8 +64,8 @@ public static class ConnectAnim
     static void Draw(MainWindow w, CanvasControl c, CanvasDrawingSession ds)
     {
         var S = w.G.S; var e = w.G.Ex(S.Loc);
-        double T = Anim.Off ? 3 : FakeEngine.Now / 1000, D = (S.CDur > 0 ? S.CDur : 12000) / 1000;
-        double el = Anim.Off ? D * 0.85 : (FakeEngine.Now - S.CStart) / 1000;
+        double T = Anim.Off ? 3 : AppEngine.Now / 1000, D = (S.CDur > 0 ? S.CDur : 12000) / 1000;
+        double el = Anim.Off ? D * 0.85 : (AppEngine.Now - S.CStart) / 1000;
         float scale = (float)Math.Min(c.ActualWidth / 220, c.ActualHeight / 92);
         float ox = (float)(c.ActualWidth - 220 * scale) / 2;
         ds.Transform = Matrix3x2.CreateTranslation(-40, 0) * Matrix3x2.CreateScale(scale) * Matrix3x2.CreateTranslation(ox, 0);

@@ -23,7 +23,6 @@
     </Grid>
     <Grid x:Name="Overlay" Grid.RowSpan="2" IsHitTestVisible="False">
       <Border x:Name="Snack" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="24,0,24,20" Padding="16,10" CornerRadius="6" BorderThickness="1" />
-      <Border x:Name="Codes" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="10" Padding="8,3" CornerRadius="4" Opacity="0.85" />
     </Grid>
   </Grid>
 </Window>

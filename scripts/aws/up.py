@@ -46,7 +46,7 @@ New-NetFirewallRule -Name sshd-gvpndows -DisplayName 'OpenSSH (gvpndows)' -Enabl
 r = ec2.run_instances(ImageId=img["ImageId"], InstanceType=itype, MinCount=1, MaxCount=1,
         SecurityGroupIds=[sg], UserData=userdata, InstanceInitiatedShutdownBehavior="terminate",
         MetadataOptions={"HttpTokens": "required"},
-        BlockDeviceMappings=[{"DeviceName": img["RootDeviceName"], "Ebs": {"VolumeSize": 30, "VolumeType": "gp3", "DeleteOnTermination": True}}],
+        BlockDeviceMappings=[{"DeviceName": img["RootDeviceName"], "Ebs": {"VolumeSize": int(os.environ.get("VOLUME_GB", "60")), "VolumeType": "gp3", "DeleteOnTermination": True}}],
         TagSpecifications=[{"ResourceType": t, "Tags": tags} for t in ("instance", "volume")])
 iid = r["Instances"][0]["InstanceId"]; state["instance"] = iid; state["image"] = img["Name"]; state["type"] = itype
 state["created"] = time.time(); save()

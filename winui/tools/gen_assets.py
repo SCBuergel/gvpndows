@@ -4,7 +4,7 @@
 Writes into winui/GnosisVpn/:
   Ui/Tokens.g.cs   light and dark colors from src/windows/tokens.json
   Ui/Icons.g.cs    Fluent UI System Icons path data (assets/fluent, MIT), 20x20, regular/filled
-  Assets/          logo-light.svg, logo-dark.svg, flags/<id>.<ext>, gvis-light.svg, gvis-dark.svg, qr.svg,
+  Assets/          logo-light.svg, logo-dark.svg, flags/<id>.<ext>, gvis-light.svg, gvis-dark.svg,
 Usage: python3 -I winui/tools/gen_assets.py [PROTOTYPE_DIR]
 """
 import base64, json, os, re, sys
@@ -99,9 +99,6 @@ for theme in ("light", "dark"):
     s = re.sub(r"var\((--[a-z-]+)\)", lambda m: vars_.get(m.group(1), t.get(m.group(1)[2:], "#888")), gvis)
     s = static_svg(s)
     write(os.path.join(ASSETS, f"gvis-{theme}.svg"), s)
-qr = read("assets", "qr.svg")
-if "xmlns=" not in qr[:200]: qr = qr.replace("<svg ", '<svg xmlns="http://www.w3.org/2000/svg" ', 1)
-write(os.path.join(ASSETS, "qr.svg"), qr)
 print(f"tokens {len(tokens['light'])}+{len(tokens['dark'])}, icons {len(icons)}, flags {len(img['FLAGS'])}")
 if CHECK:
     diff = []

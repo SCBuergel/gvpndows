@@ -39,7 +39,7 @@ public static class Traffic
     public static UIElement Build(MainWindow w)
     {
         var map = new CanvasControl { Width = 420, Height = 400, ClearColor = Microsoft.UI.Colors.Transparent };
-        map.Draw += (s, e) => Frame(w, e.DrawingSession, Anim.Off ? 20 : FakeEngine.Now / 1000);
+        map.Draw += (s, e) => Frame(w, e.DrawingSession, Anim.Off ? 20 : AppEngine.Now / 1000);
         if (!Anim.Off)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -180,7 +180,7 @@ public static class Traffic
                 dots.Add(() => Dot(V2(end), 4, Cl("sync"), Cl("card")));
                 if (i % 3 == 0 && on) { var q = Along(pts, (t * .35 + i * .13) % 1); pks.Add(() => ds.FillCircle(q, 2, Cl("sync-hi"))); }
             }
-        bool blocked = !on && S.Lockdown && !S.LdOffPay;
+        const bool blocked = false;   // a kill switch is not enforced on Windows yet
         foreach (var p in eps)
         {
             var age = t - p.Born; var grow = EaseO(Math.Min(1, age / 1.1));

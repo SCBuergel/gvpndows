@@ -36,13 +36,12 @@ Gnosis VPN for Windows, built step by step (same approach as the Android app in 
     because it otherwise trusts only the pipe served by the GnosisVPN service.
 - **App** (`winui/GnosisVpn`, C# / .NET 10 / Windows App SDK 1.8):
   - It runs unelevated, because Windows App SDK toasts don't work elevated.
-  - When the service's pipe exists, `Engine/RealBackend.cs` maps the core's state onto the
-    prototype's state.
-  - Otherwise, or with `--fake`, it runs the prototype's own fake backend (`Engine/FakeEngine.cs`, a
-    port of `engine.js`), where every state can be reached from Demo controls.
+  - The service is its only backend: `Engine/RealBackend.cs` maps the core's state (run mode, exits
+    and their route health, connection, PIX payment, balance, funding needs) onto what the pages
+    show (`Engine/AppEngine.cs` holds the UI state). There is no demo or simulated backend; until
+    the service answers, the app says it can't reach it and keeps polling.
 - **Not done yet:**
-  - Lockdown (the WFP kill switch for the HOPR tunnel) is only a switch in the app.
-  - The core reports no latency or load per exit, so exits show a neutral grade.
+  - Lockdown (a WFP kill switch for the HOPR tunnel) is not implemented, so the app has no switch for it.
   - There's no signed installer: `dist/windows/` is a zip with `Install.cmd` (admin prompt, then
     service, app in Program Files, Start menu entry) and `Uninstall.cmd`.
 
@@ -68,11 +67,10 @@ Rust builds happen on a throwaway DigitalOcean droplet, not on this machine:
   `deadline` before `up.py`; the server also shuts itself down, and shutdown means terminate.
 - **Helpers:** `winssh.sh` (SSH, multiplexed) and `windesk.sh` (scripts in the signed-in desktop
   session; the console auto-signs in as the standard user `gvuser`).
-- **Screenshots:** `GnosisVPN.exe --shots LIST DIR` captures any prototype deep link at any window
-  size; `check-shots.py` validates the PNGs. `ref-shots.ps1` captures the prototype in Edge, and
-  `montage.ps1` builds side-by-side comparison sheets.
-- **Live tests:** `--snap DIR`, `--click-connect QUERY` and `--click-disconnect-after N` drive the real
-  app.
+- **Server setup:** `setup-server.ps1` (once, over SSH): the standard user `gvuser` signed in
+  automatically, .NET 8 and 10 SDKs, no display sleep.
+- **Live tests:** `--snap DIR` (a screenshot every 10 s), `--click-connect QUERY` and
+  `--click-disconnect-after N` drive the real app against the running service.
 - **Tunnel test (milestone 3):** `gvpndows.exe --e2e PLAN` (run by `e2e.sh`) does staged downloads with
   per-second throughput. `pcap-summary.py` and `telemetry-summary.py` read its captures.
 - **Speed test:** `speedtest/` measures a transfer second by second, in either direction.

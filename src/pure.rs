@@ -18,6 +18,8 @@ pub enum PipeRoute {
     Start,
     /// {"type":"x_send_log"}: post the service's recent log to the developer relay
     SendLog,
+    /// {"type":"x_app_log","lines":[...]}: the app's own log lines, added to the service log (debug builds)
+    AppLog,
     /// an allowed core command, passed on unchanged
     Command,
     /// refused, with the reason for the reply
@@ -36,6 +38,7 @@ pub fn route_request(line: &str) -> PipeRoute {
         Some("x_state") => PipeRoute::State,
         Some("x_start") => PipeRoute::Start,
         Some("x_send_log") => PipeRoute::SendLog,
+        Some("x_app_log") => PipeRoute::AppLog,
         Some(t) if ALLOWED_COMMANDS.contains(&t) => PipeRoute::Command,
         Some(t) => PipeRoute::Rejected(format!("command {t:?} is not available over the pipe")),
         None => PipeRoute::Rejected("request has no \"type\"".into()),
@@ -154,6 +157,16 @@ pub fn select_lines(lines: &[String], important: usize, other: usize) -> Vec<Str
     lines.iter().zip(keep).filter(|(_, k)| *k).map(|(l, _)| l.clone()).collect()
 }
 
+/// DEBUG FEATURE ONLY: the app's log lines as the service records them: at most 50 per request,
+/// each cut to 300 bytes (on a character boundary), control characters replaced.
+pub fn app_log_lines(v: &serde_json::Value) -> Vec<String> {
+    v["lines"].as_array().map(|a| a.iter().filter_map(|l| l.as_str()).take(50).map(|l| {
+        let mut end = l.len().min(300);
+        while end > 0 && !l.is_char_boundary(end) { end -= 1; }
+        format!("app: {}", l[..end].chars().map(|c| if c.is_control() { ' ' } else { c }).collect::<String>())
+    }).collect()).unwrap_or_default()
+}
+
 /// One e2e plan step "<exit>@<delay_s>" -> (exit query, delay); no or a bad delay is 0.
 pub fn parse_step(step: &str) -> (&str, u64) {
     match step.split_once('@') {
@@ -181,6 +194,7 @@ mod tests {
         assert_eq!(route_request(r#"{"type":"x_state"}"#), PipeRoute::State);
         assert_eq!(route_request(r#"{"type":"x_start"}"#), PipeRoute::Start);
         assert_eq!(route_request(r#"{"type":"x_send_log"}"#), PipeRoute::SendLog);
+        assert_eq!(route_request(r#"{"type":"x_app_log","lines":["a"]}"#), PipeRoute::AppLog);
         assert_eq!(route_request(r#"{"type":"connect","destination":"a"}"#), PipeRoute::Command);
         assert_eq!(route_request(r#"{"type":"status"}"#), PipeRoute::Command);
     }
@@ -287,6 +301,19 @@ mod tests {
         assert_eq!(select_lines(&lines, 9, 9), lines);
         assert_eq!(select_lines(&lines, 9, 1), ["b WARN w1", "d ERROR e1", "e INFO x3"]);
         assert_eq!(select_lines(&lines, 1, 0), ["d ERROR e1"]);
+    }
+
+    #[test]
+    fn app_log_lines_are_bounded() {
+        let many: Vec<String> = (0..80).map(|i| format!("line {i}")).collect();
+        let v = serde_json::json!({ "type": "x_app_log", "lines": many });
+        let got = app_log_lines(&v);
+        assert_eq!(got.len(), 50);
+        assert_eq!(got[0], "app: line 0");
+        let long = serde_json::json!({ "lines": ["é".repeat(400) + "\n\u{1b}x"] });
+        let l = &app_log_lines(&long)[0];
+        assert!(l.len() <= 305 && !l.contains('\n'));
+        assert!(app_log_lines(&serde_json::json!({})).is_empty());
     }
 
     #[test]

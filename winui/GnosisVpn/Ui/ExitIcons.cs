@@ -7,7 +7,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.UI;
-using static GnosisVpn.Engine.FakeEngine;
+using static GnosisVpn.Engine.AppEngine;
 
 namespace GnosisVpn.Ui;
 
