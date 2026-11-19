@@ -9,7 +9,7 @@ namespace GnosisVpn.Ui;
 /// the lifetime of the process, so no callback can reach a collected delegate.</summary>
 public sealed class NotifyIconNative : IDisposable
 {
-    const uint WM_TRAY = 0x8000 + 1, WM_NULL = 0, WM_LBUTTONUP = 0x0202, WM_RBUTTONUP = 0x0205, WM_CONTEXTMENU = 0x007B, NIN_SELECT = 0x0400, NIN_KEYSELECT = 0x0401;
+    const uint WM_TRAY = 0x8000 + 1, WM_NULL = 0, WM_CONTEXTMENU = 0x007B, NIN_SELECT = 0x0400, NIN_KEYSELECT = 0x0401;
     const uint NIM_ADD = 0, NIM_MODIFY = 1, NIM_DELETE = 2, NIM_SETVERSION = 4, NIF_MESSAGE = 1, NIF_ICON = 2, NIF_TIP = 4, NIF_SHOWTIP = 0x80, NOTIFYICON_VERSION_4 = 4;
     const uint MF_STRING = 0, MF_SEPARATOR = 0x800, TPM_RETURNCMD = 0x100, TPM_RIGHTBUTTON = 2, TPM_BOTTOMALIGN = 0x20, TPM_RIGHTALIGN = 8, IMAGE_ICON = 1, LR_LOADFROMFILE = 0x10;
 
@@ -54,7 +54,8 @@ public sealed class NotifyIconNative : IDisposable
     readonly uint taskbarCreated;
     IntPtr hIcon;
     string tip = "Gnosis VPN", iconPath = "";
-    bool added;
+    bool added, menuOpen;
+    long lastSelect;
 
     /// <summary>Left click (or keyboard select) with the click position in screen pixels.</summary>
     public Action<POINT>? LeftClick;
@@ -103,8 +104,14 @@ public sealed class NotifyIconNative : IDisposable
             {
                 uint ev = (uint)(lp.ToInt64() & 0xFFFF);
                 var pt = new POINT { X = (short)(wp.ToInt64() & 0xFFFF), Y = (short)((wp.ToInt64() >> 16) & 0xFFFF) };
-                if (ev is WM_LBUTTONUP or NIN_SELECT or NIN_KEYSELECT) me.LeftClick?.Invoke(pt);
-                else if (ev is WM_CONTEXTMENU or WM_RBUTTONUP) me.ShowMenu(pt);
+                // Version 4 sends NIN_SELECT after the mouse-up and WM_CONTEXTMENU after the right
+                // mouse-up: act only on those, once per click (Enter can send NIN_KEYSELECT twice).
+                if (ev is NIN_SELECT or NIN_KEYSELECT)
+                {
+                    var now = Environment.TickCount64;
+                    if (now - me.lastSelect >= 300) { me.lastSelect = now; me.LeftClick?.Invoke(pt); }
+                }
+                else if (ev == WM_CONTEXTMENU) me.ShowMenu(pt);
                 return IntPtr.Zero;
             }
             if (msg == me.taskbarCreated) { me.added = false; me.Set(me.iconPath, me.tip); return IntPtr.Zero; }   // Explorer restarted
@@ -114,16 +121,23 @@ public sealed class NotifyIconNative : IDisposable
 
     void ShowMenu(POINT pt)
     {
+        if (menuOpen) return;   // a tray message inside TrackPopupMenuEx's loop must not open a second menu
         var items = Menu?.Invoke(); if (items == null) return;
-        var m = CreatePopupMenu();
-        for (int i = 0; i < items.Count; i++)
-            if (items[i].label == null) AppendMenu(m, MF_SEPARATOR, UIntPtr.Zero, null);
-            else AppendMenu(m, MF_STRING, (UIntPtr)(i + 1), items[i].label);
-        SetForegroundWindow(hwnd);
-        if (pt.X == 0 && pt.Y == 0) GetCursorPos(out pt);
-        int cmd = TrackPopupMenuEx(m, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | TPM_RIGHTALIGN, pt.X, pt.Y, hwnd, IntPtr.Zero);
-        PostMessage(hwnd, WM_NULL, IntPtr.Zero, IntPtr.Zero);
-        DestroyMenu(m);
+        int cmd;
+        menuOpen = true;
+        try
+        {
+            var m = CreatePopupMenu();
+            for (int i = 0; i < items.Count; i++)
+                if (items[i].label == null) AppendMenu(m, MF_SEPARATOR, UIntPtr.Zero, null);
+                else AppendMenu(m, MF_STRING, (UIntPtr)(i + 1), items[i].label);
+            SetForegroundWindow(hwnd);
+            if (pt.X == 0 && pt.Y == 0) GetCursorPos(out pt);
+            cmd = TrackPopupMenuEx(m, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | TPM_RIGHTALIGN, pt.X, pt.Y, hwnd, IntPtr.Zero);
+            PostMessage(hwnd, WM_NULL, IntPtr.Zero, IntPtr.Zero);
+            DestroyMenu(m);
+        }
+        finally { menuOpen = false; }
         if (cmd > 0) items[cmd - 1].act?.Invoke();
     }
 
