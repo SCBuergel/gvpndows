@@ -6,6 +6,10 @@
 #        KEEP=1 scripts/do-build/run.sh   keep the droplet: iterate with rebuild.sh, end with down.sh
 # Env: SIZE (c-8), REGION (ams3), DEADLINE_S (10800). Token: $DO_TOKEN_FILE (default ~/do-api-token).
 set -euo pipefail
+# The token file as an absolute path (never the token): the deadline fires without this environment.
+DO_TOKEN_FILE=${DO_TOKEN_FILE:-$HOME/do-api-token}; DO_TOKEN_FILE=${DO_TOKEN_FILE/#\~/$HOME}
+[ -r "$DO_TOKEN_FILE" ] || { echo "no readable DigitalOcean token file at $DO_TOKEN_FILE (set DO_TOKEN_FILE)" >&2; exit 1; }
+DO_TOKEN_FILE=$(realpath "$DO_TOKEN_FILE"); export DO_TOKEN_FILE
 cd "$(dirname "$0")/../.."
 REPO=$(pwd)
 SIZE=${SIZE:-c-8}; REGION=${REGION:-ams3}; DEADLINE_S=${DEADLINE_S:-10800}
@@ -17,7 +21,7 @@ KNOWN_HOSTS=$ST/$NAME.known_hosts   # fresh per run: droplet IPs get reused
 t0=$(date +%s); t=$t0
 step() { n=$(date +%s); echo "STEP $1 $((n - t))"; t=$n; }
 id=""; ip=""; cpid=""
-arm_deadline() { python3 "$DEADLINE" start "$NAME" "$DEADLINE_S" -- python3 -I "$REPO/scripts/do-build/droplet.py" delete "$id"; }
+arm_deadline() { python3 "$DEADLINE" start "$NAME" "$DEADLINE_S" -- env "DO_TOKEN_FILE=$DO_TOKEN_FILE" python3 -I "$REPO/scripts/do-build/droplet.py" delete "$id"; }
 # The id of a create that did not report one in time: the create may still be running, or its
 # POST failed client-side after DigitalOcean accepted it, so look the droplet up by its name.
 find_created() {

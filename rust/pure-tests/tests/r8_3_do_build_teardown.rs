@@ -40,6 +40,7 @@ fn run_term(mode: &str, term_after_ms: Option<u64>) -> (bool, String, String) {
     for k in ["id_ed25519", "id_ed25519.pub"] {
         fs::write(st.join(k), "fake").unwrap();
     }
+    fs::write(t.join("home/do-api-token"), "fake").unwrap(); // run.sh refuses to start without one (R8-6)
     let log = t.join("calls.log");
     let out = Command::new("bash")
         .arg(d.join("run.sh"))
@@ -80,5 +81,7 @@ fn term_during_create_arms_the_deadline_and_deletes_the_droplet() {
     assert!(!ok);
     let (deadline, delete) = (calls.find("deadline start gvpndows-build-"), calls.find("\ndelete 4243"));
     assert!(deadline.is_some() && delete.is_some() && deadline < delete, "calls: {calls}\nstderr: {err}");
+    // R8-6: the armed delete names the token file by its absolute path; the timer has no run.sh environment
+    assert!(calls.contains(" -- env DO_TOKEN_FILE=/") && calls.contains("/home/do-api-token python3 -I "), "calls: {calls}");
     assert!(calls.contains("delete 4243\n") && err.contains("deadline stays armed"), "calls: {calls}\nstderr: {err}");
 }
