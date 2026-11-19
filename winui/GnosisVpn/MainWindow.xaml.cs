@@ -50,6 +50,9 @@ public sealed partial class MainWindow : Window
         pages = new Pages(this);
         U.Mode = Prefs.Get("mode") ?? "system";
         U.StartWin = Prefs.Get("startWin") != "0"; U.StartMin = Prefs.Get("startMin") == "1";
+        // the shown On (also the default, and after a reinstall) is written to the Run key at once;
+        // an explicit Off is left alone
+        if (U.StartWin) Startup.Apply(U);
 
         G.Render += () => Render();
         G.Snack += msg => ShowSnack(msg);
