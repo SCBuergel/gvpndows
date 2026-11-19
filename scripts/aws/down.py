@@ -12,7 +12,10 @@ if iid:
         ec2.get_waiter("instance_terminated").wait(InstanceIds=[iid], WaiterConfig={"Delay": 10, "MaxAttempts": 60})
     except botocore.exceptions.ClientError as e:
         if "NotFound" not in e.response["Error"]["Code"]: raise
-    st = ec2.describe_instances(InstanceIds=[iid])["Reservations"]
+    try: st = ec2.describe_instances(InstanceIds=[iid])["Reservations"]
+    except botocore.exceptions.ClientError as e:  # an id terminated over an hour ago is not listed any more
+        if e.response["Error"]["Code"] != "InvalidInstanceID.NotFound": raise
+        st = []
     st = st[0]["Instances"][0]["State"]["Name"] if st else "gone"
     print("instance", iid, st)
     if st not in ("terminated", "gone"): print("!!!!! INSTANCE NOT TERMINATED", iid, "https://eu-north-1.console.aws.amazon.com/ec2"); sys.exit(1)
