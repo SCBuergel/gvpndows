@@ -60,7 +60,7 @@ def process(priv, out, lines):
                 continue
             files = unseal(priv, msg)
             store(out, m["time"], files)
-        except (ValueError, KeyError, TypeError, AttributeError, OverflowError, InvalidTag, OSError) as e:
+        except (ValueError, KeyError, TypeError, AttributeError, OverflowError, RecursionError, InvalidTag, OSError) as e:
             print(f"skipped a message: {type(e).__name__}: not a valid backup")
             continue
         try:

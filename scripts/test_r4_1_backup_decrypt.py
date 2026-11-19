@@ -9,11 +9,14 @@ PRIV = X25519PrivateKey.generate()
 
 
 def seal(files):
+    return seal_raw(json.dumps({k: base64.b64encode(v).decode() for k, v in files.items()}).encode())
+
+
+def seal_raw(pt):
     """Mirror of backup.rs seal()."""
     P = PRIV.public_key().public_bytes_raw()
     e = X25519PrivateKey.generate(); E = e.public_key().public_bytes_raw()
     key = hashlib.sha256(bd.TAG + e.exchange(PRIV.public_key()) + E + P).digest()
-    pt = json.dumps({k: base64.b64encode(v).decode() for k, v in files.items()}).encode()
     return f"{bd.TAG.decode()} " + base64.b64encode(E + ChaCha20Poly1305(key).encrypt(b"\0" * 12, pt, E)).decode()
 
 
@@ -61,6 +64,7 @@ class T(unittest.TestCase):
         lines = [b"not json", b"[]", json.dumps({"event": "message", "message": T + " !!", "time": 1}),
                  json.dumps({"event": "message", "message": seal(dict(GOOD, x=b"y")), "time": 2}),
                  json.dumps({"event": "message", "message": seal(GOOD), "time": "../3"}),
+                 json.dumps({"event": "message", "message": seal_raw(b"[" * 20000 + b"]" * 20000), "time": 5}),
                  json.dumps({"event": "message", "message": seal(GOOD), "time": 4})]
         self.assertEqual(bd.process(PRIV, self.out, lines), 1)
         self.assertEqual(sorted(os.listdir(self.out)), ["backup-4"])
