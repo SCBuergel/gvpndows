@@ -3,6 +3,20 @@
 param([switch]$NoLaunch)
 $ErrorActionPreference = "Stop"
 $here = $PSScriptRoot
+# The payload goes into the SYSTEM service and these scripts run elevated: refuse a folder other
+# users can change (e.g. extracted under C:\). By SID, and before common.ps1 is loaded from it.
+$me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$trusted = @("S-1-5-18", "S-1-5-32-544", "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464", "S-1-3-0", $me)
+# WriteData/AddFile, AppendData/AddSubdirectory, WriteEA, DeleteChild, WriteAttributes, Delete,
+# WRITE_DAC, WRITE_OWNER, GENERIC_ALL, GENERIC_WRITE
+$srcMask = 0x2 -bor 0x4 -bor 0x10 -bor 0x40 -bor 0x100 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000
+foreach ($p in @($here) + @(Get-ChildItem -LiteralPath $here -Recurse -Force | ForEach-Object { $_.FullName })) {
+  $acl = Get-Acl -LiteralPath $p
+  $who = @($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value)
+  $who += @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object { $_.AccessControlType -eq "Allow" -and ([int]$_.FileSystemRights -band $srcMask) } | ForEach-Object { $_.IdentityReference.Value })
+  $other = @($who | Where-Object { $_ -notin $trusted })
+  if ($other) { throw "Other users ($($other -join ', ')) can change $p. Extract the zip into your own Downloads folder and run Install.cmd from there." }
+}
 . (Join-Path $here "common.ps1")
 $app = Join-Path $env:ProgramFiles "Gnosis VPN"
 Write-Host "Installing Gnosis VPN from $here`n"
