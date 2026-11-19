@@ -86,6 +86,21 @@ public static class SelfTest
         rb.ApplyForTest(State("{\"type\":\"running\"}", connected), null);
         Check(g.S.Flash == null, "payment wait message clears");
 
+        // ---- the service or the core goes away: the connection is not shown any longer
+        rb.ApplyForTest(null, null);
+        Check(g.S.Conn == "connected", "one missed poll keeps the connection shown");
+        rb.ApplyForTest(null, null);
+        Check(g.S.Conn == "idle" && g.S.ConnSec == 0 && g.S.Alloc.Count == 0 && g.S.Flash?.Tone == "bad", "no service: idle, with a notice");
+        rb.ApplyForTest(State("{\"type\":\"running\"}", connected), null);
+        Check(g.S.Conn == "connected" && g.S.Fail == null, "connected again once the service answers");
+        rb.ApplyForTest(JsonNode.Parse("{\"core\":\"starting\",\"started\":true,\"status\":null}"), null);
+        Check(g.S.Conn == "idle", "no core status: idle");
+        rb.ApplyForTest(State("{\"type\":\"running\"}", connected), null);
+        rb.ApplyForTest(State("{\"type\":\"warmup\",\"stage\":{\"type\":\"starting_node\"}}", connected), null);
+        Check(g.S.Conn == "idle" && g.S.SyncT > 0, "core warming up again: idle");
+        rb.ApplyForTest(State("{\"type\":\"running\"}", connected), null);
+        g.S.Flash = null; g.S.Fq = new();
+
         // ---- data left belongs to the session (R7-4)
         rb.ApplyForTest(State("{\"type\":\"running\"}", connected.Replace("\"bytes_left\":639202344", "\"bytes_left\":0")), null);
         Check(g.S.Alloc.TryGetValue("gvpn-lt-1-ynm1", out var used) && used == 0, "a used-up chunk shows 0 MB left");

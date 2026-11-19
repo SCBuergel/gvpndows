@@ -225,9 +225,24 @@ public sealed class RealBackend
     /// <summary>For --selftest: feed the service's answer to a connect.</summary>
     public void ConnectReplyForTest(string dest, JsonNode? r) => ConnectReply(dest, r);
 
+    /// <summary>Polls in a row without a reply from the service.</summary>
+    int missed;
+
+    /// <summary>The service or the core went away, and with it the tunnel: the app must not keep
+    /// showing a connection. A visible notice when one was shown.</summary>
+    void DropConnection(string why)
+    {
+        var S = g.S;
+        if (S.Conn != "idle") g.SetFlash("bad", "Your VPN connection ended.", why); // beside, not instead of, an S.Fail screen
+        S.Conn = "idle"; S.ConnSec = 0; pendingConnect = null; attemptDest = null; S.Alloc.Clear();
+    }
+
     void Apply(JsonNode? st, JsonNode? bal)
     {
         var S = g.S;
+        // one missed poll is not enough to show the connection as gone
+        missed = st == null ? missed + 1 : 0;
+        if (missed >= 2) DropConnection("The Gnosis VPN service stopped.");
         if (st == null)
         {
             Core = "service not reachable: " + (link.LastError ?? "?");
@@ -244,6 +259,7 @@ public sealed class RealBackend
         var price = Wei(data?["pix_price_per_byte"]);
         if (price > 0) mbPerWx = 1e-6 / price;
         if (mode != lastMode) { App.Log($"backend: run mode {lastMode ?? "-"} -> {mode ?? "-"}"); lastMode = mode; }
+        if (mode != "running") DropConnection("The Gnosis VPN core stopped, and the tunnel with it.");
         switch (mode)
         {
             case null or "init" or "warmup" or "deploying_safe" or "restarting":
