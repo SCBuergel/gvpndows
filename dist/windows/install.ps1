@@ -30,9 +30,13 @@ if ($weak) { throw "$SvcDir is writable by non-admins: $weak" }
 $bin = '"' + $SvcExe + '" --service'
 if (-not (Get-Service GnosisVPN -ErrorAction SilentlyContinue)) {
   New-Service -Name GnosisVPN -BinaryPathName $bin -DisplayName "Gnosis VPN" -StartupType Automatic -Description "Runs the Gnosis VPN client core and the tunnel for the Gnosis VPN app. It never connects by itself." | Out-Null
-} else {
-  sc.exe config GnosisVPN binPath= $bin | Out-Null   # an update may move it from the old folder
+} elseif ($oldBin -ne $bin) {
+  # an update may move it from the old folder. Through the service manager, not sc.exe: Windows
+  # PowerShell 5.1 drops the quotes inside $bin when it starts a native program.
+  $r = Get-CimInstance Win32_Service -Filter "Name='GnosisVPN'" | Invoke-CimMethod -MethodName Change -Arguments @{ PathName = $bin }
+  if ($r.ReturnValue -ne 0) { throw "could not point the service at $SvcExe (error $($r.ReturnValue))" }
 }
+if ((Get-ServiceBinPath) -ne $bin) { throw "the service runs '$(Get-ServiceBinPath)', not '$bin'" }
 # starts with Windows (delayed, after the network), restarted if it ever crashes; connecting stays the app's job
 sc.exe config GnosisVPN start= delayed-auto | Out-Null
 sc.exe failure GnosisVPN reset= 86400 actions= restart/5000/restart/30000/restart/60000 | Out-Null
