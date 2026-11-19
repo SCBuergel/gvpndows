@@ -93,6 +93,21 @@ public static class SelfTest
         Check(rb.Handle("disconnect", null) && g.S.Conn == "idle", "disconnect");
         Check(!rb.Handle("view", null) && !rb.Handle("ptab", null), "UI-only actions stay in the UI");
 
+        // ---- connect replies and connects to no known exit
+        g.S.Loc = "";
+        Check(rb.Handle("connect", null) && g.S.Conn == "idle", "connect with no exit is ignored");
+        Check(rb.Handle("pick2", "gvpn-gone-1") && g.S.Conn == "idle", "connect to an unknown exit is ignored");
+        const string LT = "\"destination\":{\"id\":\"gvpn-lt-1-ynm1\",\"meta\":{\"name\":\"GVPN-LT-1\",\"other\":{}}}";
+        void Reply(string json) { g.S.Flash = null; g.S.Loc = "gvpn-lt-1-ynm1"; g.S.Conn = "connecting"; rb.ConnectReplyForTest("gvpn-lt-1-ynm1", JsonNode.Parse(json)); }
+        Reply("{\"type\":\"unable_to_connect\"," + LT + ",\"route_health\":{\"type\":\"unrecoverable\",\"reason\":{\"type\":\"incompatible_api_version\",\"offered\":[]}}}");
+        Check(g.S.Conn == "idle" && g.S.Flash?.Text == "This exit runs a version this app cannot talk to.", "unable_to_connect shows its reason");
+        Reply("{\"type\":\"waiting_to_connect\"," + LT + ",\"route_health\":{\"type\":\"not_routable\"}}");
+        Check(g.S.Conn == "connecting" && g.S.Flash?.Text == "There is no route to this exit right now.", "waiting_to_connect shows its reason");
+        Reply("{\"type\":\"destination_not_found\"}");
+        Check(g.S.Conn == "idle" && g.S.Flash?.Tone == "bad", "destination_not_found is a refusal");
+        Reply("{\"type\":\"destination_ambiguous\",\"candidates\":[\"a\",\"b\"]}");
+        Check(g.S.Conn == "idle" && g.S.Flash?.Tone == "bad", "destination_ambiguous is a refusal");
+
         // ---- shipped assets
         var dir = Path.Combine(AppContext.BaseDirectory, "Assets");
         foreach (var name in new[] { "app.ico", "appicon-32.png", "appicon-256.png", "tray-off.ico", "tray-ok.ico", "tray-warn.ico", "tray-bad.ico", "logo-light.svg", "logo-dark.svg", "gvis-light.svg", "gvis-dark.svg" })

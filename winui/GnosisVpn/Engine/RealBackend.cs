@@ -222,6 +222,8 @@ public sealed class RealBackend
 
     /// <summary>For --selftest: feed a service reply as if it came from the pipe.</summary>
     public void ApplyForTest(JsonNode? st, JsonNode? bal) => Apply(st, bal);
+    /// <summary>For --selftest: feed the service's answer to a connect.</summary>
+    public void ConnectReplyForTest(string dest, JsonNode? r) => ConnectReply(dest, r);
 
     void Apply(JsonNode? st, JsonNode? bal)
     {
@@ -380,7 +382,9 @@ public sealed class RealBackend
         var type = resp?["type"]?.ToString();
         string? why = r == null ? "The Gnosis VPN service did not answer (" + (cmdLink.LastError ?? "no reply") + ")."
             : r["error"] is JsonNode err ? err.ToString()
-            : type == "unable_to_connect" ? Health(resp?["route_health"], null)
+            : type == "unable_to_connect" ? Health(AsView(resp?["route_health"]), null)
+            : type == "destination_not_found" ? "This exit is no longer listed. Pick another one."
+            : type == "destination_ambiguous" ? "Several exits match this one. Pick it again from the list."
             : null;
         if (why != null)
         {
@@ -390,8 +394,11 @@ public sealed class RealBackend
             return;
         }
         if (type == "waiting_to_connect")
-            g.SetFlash("info", $"Waiting for a route to {name}.", Health(resp?["route_health"], null));
+            g.SetFlash("info", $"Waiting for a route to {name}.", Health(AsView(resp?["route_health"]), null));
     }
+
+    /// <summary>A connect reply's bare route health state, in the status's view form that Health reads.</summary>
+    static JsonObject AsView(JsonNode? state) => new() { ["state"] = state?.DeepClone() };
 
     /// <summary>Why an exit cannot be reached, in words, from its route health in the status.</summary>
     string WhyNot(string id) => Health(health.GetValueOrDefault(id), id);
@@ -434,6 +441,12 @@ public sealed class RealBackend
             "auto" => g.Best(S.Loc)?.Id ?? g.Best()?.Id,
             _ => null,
         };
+        // the tray and flyout offer Connect before the exits are known: never connect to no exit
+        if (dest != null && g.ExOrNull(dest) == null)
+        {
+            App.Log($"backend: {a} ignored, '{dest}' is not a known exit");
+            return true;
+        }
         if (dest != null)
         {
             if (S.Stack.LastOrDefault() == "pick") S.Stack.RemoveAt(S.Stack.Count - 1);
