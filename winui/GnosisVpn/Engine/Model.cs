@@ -51,7 +51,7 @@ public sealed class State
     public string Mode = "auto";           // auto | manual
     /// <summary>Data left per exit (MB), from the core's PIX chunk accounting.</summary>
     public Dictionary<string, double> Alloc = new();
-    /// <summary>The node's Safe balance in MB at the exit's chunk price.</summary>
+    /// <summary>The node's Safe balance in MB at the PIX price per byte.</summary>
     public double Balance;
     public string Icons = "node";
     public double T, ConnSec;

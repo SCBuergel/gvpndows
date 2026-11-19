@@ -70,6 +70,9 @@ public static class SelfTest
         var three = connected.Replace("\"chunks_committed\":1", "\"chunks_committed\":3").Replace("\"bytes_bought\":660160512", "\"bytes_bought\":1980481536").Replace("5941444608000000000", "17824333824000000000");
         rb.ApplyForTest(State("{\"type\":\"running\"}", three), safe);
         Check(Math.Abs(g.S.Balance - Math.Round(24.66 * 660.160512 / 5.941444608)) < 1, "balance unchanged after three PIX chunks");
+        // without pix_price_per_byte the session's rate applies: here twice the price, half the MB
+        rb.ApplyForTest(State("{\"type\":\"running\"}", three.Replace("17824333824000000000", "35648667648000000000")), safe);
+        Check(Math.Abs(g.S.Balance - Math.Round(24.66 * 1e-6 / 1.8e-8)) < 1, "balance at the session's bytes_bought / cost");
         // the status's pix_price_per_byte (here twice the session's) wins over the session's rate
         var priced = State("{\"type\":\"running\"}", three); priced["status"]!["data"]!["pix_price_per_byte"] = "18000000000";
         rb.ApplyForTest(priced, safe);
