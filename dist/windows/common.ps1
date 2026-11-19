@@ -99,7 +99,13 @@ function Stop-GnosisService([int]$max = 30) {
     Start-Sleep 1
   }
   Write-Host ""
+  # A killed service counts as failed: without this the SCM restarts it (install.ps1's recovery
+  # actions) while the files are being replaced. install.ps1 sets the actions again at its end.
+  # Start-Process passes the empty actions= "" verbatim (PowerShell 5.1 drops "" for native commands).
+  $sc = Start-Process sc.exe -ArgumentList 'failure GnosisVPN reset= 0 actions= ""' -Wait -NoNewWindow -PassThru
+  if ($sc.ExitCode) { throw "could not turn off the service's restart on failure (sc.exe exit $($sc.ExitCode)); not ending its process" }
   Get-ServiceProcess | Stop-Process -Force
-  Start-Sleep 1
-  Done "did not stop within $max s, so its process was ended"
+  for ($i = 0; $i -lt 15 -and ((Get-Service GnosisVPN).Status -ne "Stopped" -or (Get-ServiceProcess)); $i++) { Start-Sleep 1 }
+  if ((Get-Service GnosisVPN).Status -ne "Stopped" -or (Get-ServiceProcess)) { throw "the service did not stop even after its process was ended" }
+  Done "did not stop within $max s, so its process was ended (restart on failure is off until an install sets it again)"
 }
