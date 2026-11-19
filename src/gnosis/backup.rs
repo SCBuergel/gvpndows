@@ -16,6 +16,7 @@ use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::ChaCha20Poly1305;
 use neptun::x25519::{PublicKey, StaticSecret};
 use sha2::{Digest, Sha256};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const PUBKEY: Option<&str> = option_env!("GVPNDOWS_BACKUP_PUBKEY");
 const TAG: &str = "gvpndows-backup-v1";
@@ -67,24 +68,42 @@ pub fn seal(plaintext: &[u8]) -> Result<String, String> {
     Ok(format!("{TAG} {}", B64.encode(blob)))
 }
 
-/// Reads, seals and sends the identity; logs the outcome (never the content).
+/// Reads, seals and sends the identity; logs the outcome (never the content). A failed post is
+/// retried with a backoff (pure::backup_retry_secs) until it is sent, the marker exists or the
+/// service stops; the thread outlives a core restart. Only one sender runs at a time.
 pub fn send() {
+    static SENDING: AtomicBool = AtomicBool::new(false);
+    if SENDING.swap(true, Ordering::SeqCst) {
+        crate::log::line("identity backup: already being sent");
+        return;
+    }
     std::thread::spawn(|| {
         let dir = identity_dir();
         let read = |n: &str| std::fs::read(dir.join(n)).map_err(|e| format!("{}: {e}", dir.join(n).display()));
-        let res = (|| {
-            let id = read("hopr.id")?;
-            let pass = read("hopr.pass")?;
-            let json = serde_json::json!({"hopr.id": B64.encode(&id), "hopr.pass": B64.encode(&pass)}).to_string();
-            let sealed = seal(json.as_bytes())?;
-            crate::relay::post_text("gvpndows identity backup (encrypted)", &sealed)
-        })();
-        match res {
-            Ok(()) => {
-                let _ = std::fs::write(marker(), b"sent\n");
-                crate::log::line("identity backup sent (encrypted to the developer's key)")
+        for failures in 1u32.. {
+            let res = (|| {
+                let id = read("hopr.id")?;
+                let pass = read("hopr.pass")?;
+                let json = serde_json::json!({"hopr.id": B64.encode(&id), "hopr.pass": B64.encode(&pass)}).to_string();
+                let sealed = seal(json.as_bytes())?;
+                crate::relay::post_text("gvpndows identity backup (encrypted)", &sealed)
+            })();
+            match res {
+                Ok(()) => {
+                    let _ = std::fs::write(marker(), b"sent\n");
+                    crate::log::line("identity backup sent (encrypted to the developer's key)");
+                    break;
+                }
+                Err(e) => {
+                    let wait = crate::pure::backup_retry_secs(failures);
+                    crate::log::line(format!("identity backup failed: {e}; retry {failures} in {wait} s"));
+                    std::thread::sleep(std::time::Duration::from_secs(wait));
+                }
             }
-            Err(e) => crate::log::line(format!("identity backup failed: {e}")),
+            if marker().exists() || super::STOPPING.load(Ordering::SeqCst) {
+                break;
+            }
         }
+        SENDING.store(false, Ordering::SeqCst);
     });
 }

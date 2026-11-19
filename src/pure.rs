@@ -329,6 +329,12 @@ pub fn tunnel_dns_servers(dns: Option<&str>) -> Vec<IpAddr> {
     dns.map_or(Vec::new(), |d| d.split(',').filter_map(|s| s.trim().parse().ok()).collect())
 }
 
+/// DEBUG FEATURE ONLY: seconds before the identity backup is tried again after `failures` failed
+/// posts in a row: 30 s, doubling, at most 10 minutes.
+pub fn backup_retry_secs(failures: u32) -> u64 {
+    (30u64 << failures.saturating_sub(1).min(5)).min(600)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
