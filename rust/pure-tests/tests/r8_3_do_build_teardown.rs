@@ -45,6 +45,7 @@ fn run_term(mode: &str, term_after_ms: Option<u64>) -> (bool, String, String) {
     let out = Command::new("bash")
         .arg(d.join("run.sh"))
         .env("HOME", t.join("home"))
+        .env_remove("DO_TOKEN_FILE") // the fake HOME's token file, never the caller's
         .env("DEADLINE", t.join("deadline"))
         .env("FAKE_LOG", &log)
         .env("FAKE_MODE", mode)
