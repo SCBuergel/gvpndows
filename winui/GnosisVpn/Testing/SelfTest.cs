@@ -86,6 +86,16 @@ public static class SelfTest
         rb.ApplyForTest(State("{\"type\":\"running\"}", connected), null);
         Check(g.S.Flash == null, "payment wait message clears");
 
+        // ---- data left belongs to the session (R7-4)
+        rb.ApplyForTest(State("{\"type\":\"running\"}", connected.Replace("\"bytes_left\":639202344", "\"bytes_left\":0")), null);
+        Check(g.S.Alloc.TryGetValue("gvpn-lt-1-ynm1", out var used) && used == 0, "a used-up chunk shows 0 MB left");
+        rb.ApplyForTest(State("{\"type\":\"running\"}", connected.Replace("\"bytes_left\":639202344", "\"bytes_left\":null")), null);
+        Check(g.S.Alloc.Count == 0, "no bytes_left, no data left");
+        rb.ApplyForTest(State("{\"type\":\"running\"}", connected), null);
+        rb.ApplyForTest(State("{\"type\":\"running\"}"), null);
+        Check(g.S.Alloc.Count == 0 && g.Left("gvpn-lt-1-ynm1") == 0, "data left goes when the session ends");
+        rb.ApplyForTest(State("{\"type\":\"running\"}", connected), null);
+
         // ---- actions: connect / switch / disconnect go to the service
         Check(rb.Handle("pick2", "gvpn-ger-1-j9os") && g.S.Conn == "connecting" && g.S.Loc == "gvpn-ger-1-j9os", "a pick connects through the service");
         rb.ApplyForTest(State("{\"type\":\"running\"}", $"{{\"type\":\"connecting\",\"destination\":\"gvpn-ger-1-j9os\",\"since\":{since},\"phase\":{{\"type\":\"init\"}}}}"), null);

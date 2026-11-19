@@ -353,12 +353,16 @@ public sealed class RealBackend
         var pix = conn?["pix"];
         if (pix != null && curId != null)
         {
-            var left = Ms(pix["bytes_left"]) / 1e6; var chunk = Ms(pix["chunk_bytes"]) / 1e6;
+            var chunk = Ms(pix["chunk_bytes"]) / 1e6;
             var bought = Ms(pix["bytes_bought"]) / 1e6; var cost = Wei(pix["cost"]);
-            if (left > 0) S.Alloc[curId] = left;
             if (price <= 0 && bought > 0 && cost > 0) mbPerWx = bought / cost;
             if (chunk > 0) ChunkMb = chunk;
         }
+        // Data left belongs to the session: only the current exit's, while its session is up (0 when used up).
+        var live = kind is "connecting" or "reconnecting" or "connected" ? curId : null;
+        foreach (var id in S.Alloc.Keys.Where(k => k != live).ToList()) S.Alloc.Remove(id);
+        if (live != null && pix?["bytes_left"] is JsonNode bl) S.Alloc[live] = Ms(bl) / 1e6;
+        else if (live != null) S.Alloc.Remove(live);
         var waiting = conn?["stall"]?["awaiting_payment_since"] != null;
         var pixPhase = pix?["phase"]?["type"]?.ToString();
         if (kind == "connected" && (waiting || pixPhase == "payment_failed"))
