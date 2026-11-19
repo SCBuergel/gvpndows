@@ -258,11 +258,13 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            var sig = $"{Theme.Dark}|{bk}|{G.Page}|{S.Fail?.Code}|{S.Fail?.Title}|{G.Real.NeedWx}|{G.Real.NodeAddress}";
+            var direct = bk == "gate" && G.Page == "direct";
+            // the funding page shows the node's balances and the Copy feedback: rebuild when they change
+            var sig = $"{Theme.Dark}|{bk}|{G.Page}|{S.Fail?.Code}|{S.Fail?.Title}|{G.Real.NeedWx}|{G.Real.NodeAddress}" + (direct ? "|" + pages.Signature("direct") : "");
             if (sig != curSoloSig)
             {
                 live.Clear();
-                SoloHost.Content = bk == "gate" && G.Page == "direct" ? pages.Build("direct") : SoloScreens.Build(this, bk);
+                SoloHost.Content = direct ? pages.Build("direct") : SoloScreens.Build(this, bk);
                 curSoloSig = sig;
             }
         }
