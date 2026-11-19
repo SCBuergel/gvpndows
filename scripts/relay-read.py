@@ -3,12 +3,13 @@
 ~/.config/gvpndows-secrets/ntfy-topic). Encrypted log parts are decrypted with the backup key;
 identity backups are only named (decrypt them with backup-decrypt.py). Anyone holding a test exe
 can post to the topic: messages that are not decrypted log parts are marked, control characters
-are shown as '?', and a malformed message is skipped.
+are shown as '?', and a malformed message is skipped. The sealing key ships in every exe, so a
+decrypted part can be forged too.
 Usage: relay-read.py [SINCE, default 12h]"""
 import base64, binascii, hashlib, json, os, sys, time, urllib.request, zlib
 TAG = b"gvpndows-backup-v1"
 MAX_LOG = 4 << 20  # decompressed bytes shown per log part
-PLAIN = "[NOT ENCRYPTED, anyone can post this] "
+PLAIN = "[NOT DECRYPTED, anyone can post this] "
 
 
 def clean(s, multiline=False):
@@ -27,7 +28,7 @@ def unseal(priv, msg):
 def inflate(raw):
     d = zlib.decompressobj()
     out = d.decompress(raw, MAX_LOG)
-    if d.unconsumed_tail:
+    if d.unconsumed_tail or (not d.eof and len(out) >= MAX_LOG):
         return out + b"\n(log part truncated at 4 MiB)"
     if not d.eof:
         raise zlib.error("incomplete stream")
