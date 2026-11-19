@@ -302,7 +302,7 @@ fn handle_request(run: u64, req: RequestToRoot, to_root: &std::sync::mpsc::Sende
             });
         }
         RequestToRoot::ProbeStopped => {}
-        req => {
+        req @ (RequestToRoot::SetupTunnel { .. } | RequestToRoot::TearDownWg | RequestToRoot::UpdatePeerIps { .. }) => {
             if to_root.send(req).is_err() {
                 log::line("gnosis: root thread is gone; tunnel request dropped");
             }
@@ -329,7 +329,7 @@ fn apply_request(run: u64, req: RequestToRoot) {
         RequestToRoot::UpdatePeerIps { peer_ips } => {
             with_root(run, |r| r.update_peer_ips(&peer_ips));
         }
-        _ => {}
+        RequestToRoot::KillswitchLockdown { .. } | RequestToRoot::Ping { .. } | RequestToRoot::ProbeStopped => {}
     }
 }
 
