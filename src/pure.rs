@@ -81,6 +81,37 @@ pub fn missing_tunnel_routes(present: &[(u64, std::net::IpAddr, u8)], tun_luid: 
     TUNNEL_ROUTES.into_iter().filter(|&(d, l)| !present.contains(&(tun_luid, d, l))).collect()
 }
 
+/// Private and link-local ranges routed outside the tunnel via the WAN gateway (as upstream).
+pub const BYPASS_LANS: [(std::net::Ipv4Addr, u8); 4] = [
+    (std::net::Ipv4Addr::new(10, 0, 0, 0), 8),
+    (std::net::Ipv4Addr::new(172, 16, 0, 0), 12),
+    (std::net::Ipv4Addr::new(192, 168, 0, 0), 16),
+    (std::net::Ipv4Addr::new(169, 254, 0, 0), 16),
+];
+
+/// A bypass route the service added, recorded in its state folder so the next start can remove
+/// what a crash or forced stop left: (interface LUID, destination, prefix length, next hop).
+pub type BypassRec = (u64, std::net::IpAddr, u8, std::net::IpAddr);
+
+pub fn bypass_record_line(r: &BypassRec) -> String {
+    format!("{:#x} {}/{} {}\n", r.0, r.1, r.2, r.3)
+}
+
+/// The records in a file of `bypass_record_line`s. Only routes the service can have added count
+/// (an IPv4 /32 or one of BYPASS_LANS, via a gateway); anything else is skipped, never deleted.
+pub fn parse_bypass_records(text: &str) -> Vec<BypassRec> {
+    let parse = |l: &str| -> Option<BypassRec> {
+        let mut f = l.split_whitespace();
+        let luid = u64::from_str_radix(f.next()?.strip_prefix("0x")?, 16).ok()?;
+        let (d, len) = f.next()?.split_once('/')?;
+        let (d, len): (std::net::Ipv4Addr, u8) = (d.parse().ok()?, len.parse().ok()?);
+        let hop: std::net::Ipv4Addr = f.next()?.parse().ok()?;
+        let ours = len == 32 || BYPASS_LANS.contains(&(d, len));
+        (f.next().is_none() && ours && !hop.is_unspecified()).then_some((luid, d.into(), len, hop.into()))
+    };
+    text.lines().filter_map(parse).collect()
+}
+
 /// Owners the service trusts for its state folders: SYSTEM and Administrators. A folder owned by
 /// anyone else may hold files planted by that user (a node key whose secret they know).
 pub fn owner_trusted(sid: &str) -> bool {

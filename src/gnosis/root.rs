@@ -19,12 +19,6 @@ use std::time::Duration;
 
 const ADAPTER_NAME: &str = "GnosisVPN";
 const ADAPTER_GUID: u128 = 0x6776706e_646f_7773_8000_676e6f736973;
-const RFC1918: [(Ipv4Addr, u8); 4] = [
-    (Ipv4Addr::new(10, 0, 0, 0), 8),
-    (Ipv4Addr::new(172, 16, 0, 0), 12),
-    (Ipv4Addr::new(192, 168, 0, 0), 16),
-    (Ipv4Addr::new(169, 254, 0, 0), 16),
-];
 
 /// Packet counters between Windows and the core, sampled by `telemetry` (1 Hz).
 /// up = Windows -> core (what apps send), down = core -> Windows (what apps receive).
@@ -159,6 +153,8 @@ pub struct Root {
     wan: Option<(u64, IpAddr)>,
     bypass: Vec<net::Route>,
     bypass_peers: BTreeSet<Ipv4Addr>,
+    /// Recorded bypass routes of an earlier run that could not be removed at start: ours.
+    stale_bypass: Vec<net::Route>,
     tunnel_routes: Vec<net::Route>,
     pub blokli_ip: Option<Ipv4Addr>,
     /// DEBUG FEATURE ONLY: the developer log relay's addresses, routed outside the tunnel so logs
@@ -187,7 +183,7 @@ impl Root {
         if !hosts.is_empty() {
             log::line(format!("gnosis: DEBUG BUILD: the log relay {} ({}) goes outside the tunnel", hosts.join(", "), service_ips.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(", ")));
         }
-        Root { blokli_ip: Some(blokli_ip), service_ips, ..Default::default() }
+        Root { blokli_ip: Some(blokli_ip), service_ips, stale_bypass: sweep_bypass(), ..Default::default() }
     }
 
     fn ensure_adapter(&mut self) -> Result<u64, String> {
@@ -241,11 +237,22 @@ impl Root {
     }
 
     fn remove_bypass(&mut self) {
-        for r in self.bypass.drain(..).rev() {
-            if let Err(e) = net::delete_route(&r) {
-                log::line(format!("bypass: {e}"));
+        // ours too: routes an earlier run left that this run did not add again
+        let mut ours: Vec<net::Route> = self.bypass.drain(..).rev().collect();
+        for s in self.stale_bypass.drain(..) {
+            if !ours.iter().any(|r| rec(r) == rec(&s)) {
+                ours.push(s);
             }
         }
+        let mut kept = Vec::new();
+        for r in ours {
+            if let Err(e) = net::delete_route(&r) {
+                log::line(format!("bypass: {e}"));
+                kept.push(r);
+            }
+        }
+        record_bypass(&kept, false); // retried by the next teardown or start
+        self.stale_bypass = kept;
         self.bypass_peers.clear();
     }
 
@@ -257,7 +264,7 @@ impl Root {
         }
         self.bypass_peers.extend(new.iter().copied());
         if !self.bypass.iter().any(|r| r.prefix_len < 32) {
-            for (net, l) in RFC1918 {
+            for (net, l) in crate::pure::BYPASS_LANS {
                 self.add_bypass(IpAddr::V4(net), l, wan);
             }
         }
@@ -267,8 +274,13 @@ impl Root {
     fn add_bypass(&mut self, dest: IpAddr, len: u8, wan: (u64, IpAddr)) {
         let r = net::Route { if_luid: wan.0, dest, prefix_len: len, next_hop: wan.1 };
         match net::add_route(&r) {
-            Ok(true) => self.bypass.push(r),
-            Ok(false) => {} // already there (not ours)
+            Ok(true) => {
+                record_bypass(&[r.clone()], true);
+                self.bypass.push(r);
+            }
+            // already there: ours if an earlier run recorded it and the sweep could not remove it
+            Ok(false) if self.stale_bypass.iter().any(|s| rec(s) == rec(&r)) => self.bypass.push(r),
+            Ok(false) => {} // not ours
             Err(e) => log::line(format!("bypass: {e}")),
         }
     }
@@ -374,6 +386,48 @@ impl Root {
             log::line("tunnel adapter removed");
         }
     }
+}
+
+fn rec(r: &net::Route) -> crate::pure::BypassRec {
+    (r.if_luid, r.dest, r.prefix_len, r.next_hop)
+}
+
+/// The bypass routes added and not yet removed, in the service's state folder (SYSTEM and
+/// Administrators only): a crash or forced stop skips teardown, and these routes outlive the process.
+fn bypass_record_path() -> std::path::PathBuf {
+    super::user_dirs().data.join("bypass-routes.txt")
+}
+
+/// Appends `routes` to the record, or replaces it with them.
+fn record_bypass(routes: &[net::Route], append: bool) {
+    use std::io::Write;
+    let path = bypass_record_path();
+    let text: String = routes.iter().map(|r| crate::pure::bypass_record_line(&rec(r))).collect();
+    let res = std::fs::create_dir_all(path.parent().expect("data dir"))
+        .and_then(|_| std::fs::OpenOptions::new().create(true).write(true).append(append).truncate(!append).open(&path))
+        .and_then(|mut f| f.write_all(text.as_bytes()));
+    if let Err(e) = res {
+        log::line(format!("bypass: cannot record routes in {}: {e}", path.display()));
+    }
+}
+
+/// Removes the bypass routes an earlier run recorded and left behind; returns those still in place.
+fn sweep_bypass() -> Vec<net::Route> {
+    let Ok(text) = std::fs::read_to_string(bypass_record_path()) else { return Vec::new() };
+    let mut kept = Vec::new();
+    let recs = crate::pure::parse_bypass_records(&text);
+    for (if_luid, dest, prefix_len, next_hop) in recs.iter().copied() {
+        let r = net::Route { if_luid, dest, prefix_len, next_hop };
+        if let Err(e) = net::delete_route(&r) {
+            log::line(format!("bypass sweep: {e}"));
+            kept.push(r);
+        }
+    }
+    if !recs.is_empty() {
+        log::line(format!("bypass sweep: cleared {} routes recorded by an earlier run", recs.len() - kept.len()));
+    }
+    record_bypass(&kept, false);
+    kept
 }
 
 fn parse_cidr(s: &str) -> Result<(IpAddr, u8), String> {
