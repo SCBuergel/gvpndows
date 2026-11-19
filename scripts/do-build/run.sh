@@ -16,9 +16,26 @@ KNOWN_HOSTS=$ST/$NAME.known_hosts   # fresh per run: droplet IPs get reused
 [ -f "$ST/id_ed25519" ] || ssh-keygen -q -t ed25519 -N '' -C gvpndows-build -f "$ST/id_ed25519"
 t0=$(date +%s); t=$t0
 step() { n=$(date +%s); echo "STEP $1 $((n - t))"; t=$n; }
-id=""; ip=""
+id=""; ip=""; cpid=""
+# The id of a create that did not report one in time: the create may still be running, or its
+# POST failed client-side after DigitalOcean accepted it, so look the droplet up by its name.
+find_created() {
+    while [ -z "$id" ] && kill -0 "$cpid" 2>/dev/null; do id=$(head -1 "$ST/$NAME.create" 2>/dev/null || true); sleep 1; done
+    kill "$cpid" 2>/dev/null || true
+    [ -n "$id" ] || id=$(head -1 "$ST/$NAME.create" 2>/dev/null || true)
+    [ -z "$id" ] || return 0
+    for _ in 1 2 3; do
+        if ! id=$(python3 -I scripts/do-build/droplet.py find "$NAME" | head -1); then
+            id=""; echo "!!! cannot look up droplet $NAME; it may exist. Check https://cloud.digitalocean.com/droplets !!!" >&2; return 0
+        fi
+        [ -z "$id" ] || return 0
+        sleep 5
+    done
+    echo "no droplet named $NAME found" >&2
+}
 teardown() {
     rc=$?
+    [ -n "$id" ] || [ -z "$cpid" ] || find_created
     if [ -n "$id" ] && [ "${KEEP:-0}" = 1 ] && [ -n "$ip" ]; then
         printf 'id=%s\nip=%s\nname=%s\nknown_hosts=%s\nt0=%s\n' "$id" "$ip" "$NAME" "$KNOWN_HOSTS" "$t0" > "$ST/current"
         echo "KEPT droplet (exit $rc) $id at $ip (deadline $NAME armed); iterate: scripts/do-build/rebuild.sh, end: scripts/do-build/down.sh"
@@ -39,8 +56,10 @@ trap 'exit 130' INT TERM HUP
 
 python3 -I scripts/do-build/droplet.py create "$NAME" "$SIZE" "$REGION" "$ST/id_ed25519.pub" > "$ST/$NAME.create" &
 cpid=$!
-for _ in $(seq 1 30); do id=$(head -1 "$ST/$NAME.create" 2>/dev/null || true); [ -n "$id" ] && break; sleep 1; done
-[ -n "$id" ] || { wait $cpid || true; echo "droplet creation failed" >&2; exit 1; }
+# the id comes once the POST returns (up to its 60 s timeout); wait as long as create runs
+while [ -z "$id" ] && kill -0 $cpid 2>/dev/null; do id=$(head -1 "$ST/$NAME.create" 2>/dev/null || true); [ -n "$id" ] || sleep 1; done
+[ -n "$id" ] || id=$(head -1 "$ST/$NAME.create" 2>/dev/null || true)
+[ -n "$id" ] || { echo "droplet creation failed" >&2; exit 1; }
 python3 "$DEADLINE" start "$NAME" "$DEADLINE_S" -- python3 -I "$REPO/scripts/do-build/droplet.py" delete "$id"
 wait $cpid
 ip=$(sed -n 2p "$ST/$NAME.create" | cut -d' ' -f1)

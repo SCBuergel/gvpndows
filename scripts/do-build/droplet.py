@@ -5,6 +5,7 @@
   droplet.py ip ID
   droplet.py delete ID     idempotent: a droplet already gone counts as success; verifies 404
   droplet.py list          droplets on the account
+  droplet.py find NAME     ids of the build droplets named NAME (fails if the API cannot be read)
 
 The API token is read from $DO_TOKEN_FILE (default ~/do-api-token) and never printed.
 The SSH key goes in through cloud-init, because the token may not manage account SSH keys.
@@ -89,6 +90,13 @@ if __name__ == "__main__":
         print(ipv4(js["droplet"]) if st == 200 else f"status {st}")
     elif cmd == "delete" and len(sys.argv) == 3:
         delete(sys.argv[2])
+    elif cmd == "find" and len(sys.argv) == 3:
+        st, js = call("GET", "/droplets?tag_name=gvpndows-build&per_page=200")
+        if st != 200:
+            sys.exit(f"list failed: {st}")
+        for d in js.get("droplets", []):
+            if d["name"] == sys.argv[2]:
+                print(d["id"])
     elif cmd == "list":
         st, js = call("GET", "/droplets?per_page=200")
         for d in js.get("droplets", []):
