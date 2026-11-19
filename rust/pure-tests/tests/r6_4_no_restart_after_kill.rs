@@ -17,7 +17,7 @@ fn recovery_actions_are_off_before_the_kill_and_set_again_after_the_copy() {
     let checked = at("if ($sc.ExitCode) { throw");
     let kill = at("Get-ServiceProcess | Stop-Process -Force");
     let wait = at("for ($i = 0; $i -lt 15");
-    let fail = at(r#"throw "the service did not stop even after its process was ended""#);
+    let fail = at(r#"throw "the service did not stop even after its process was ended (its restart on failure is off until an install succeeds)""#);
     assert!(clear < checked && checked < kill && kill < wait && wait < fail);
 
     let install = read("install.ps1");

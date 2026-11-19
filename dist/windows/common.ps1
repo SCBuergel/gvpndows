@@ -106,6 +106,6 @@ function Stop-GnosisService([int]$max = 30) {
   if ($sc.ExitCode) { throw "could not turn off the service's restart on failure (sc.exe exit $($sc.ExitCode)); not ending its process" }
   Get-ServiceProcess | Stop-Process -Force
   for ($i = 0; $i -lt 15 -and ((Get-Service GnosisVPN).Status -ne "Stopped" -or (Get-ServiceProcess)); $i++) { Start-Sleep 1 }
-  if ((Get-Service GnosisVPN).Status -ne "Stopped" -or (Get-ServiceProcess)) { throw "the service did not stop even after its process was ended" }
+  if ((Get-Service GnosisVPN).Status -ne "Stopped" -or (Get-ServiceProcess)) { throw "the service did not stop even after its process was ended (its restart on failure is off until an install succeeds)" }
   Done "did not stop within $max s, so its process was ended (restart on failure is off until an install sets it again)"
 }
