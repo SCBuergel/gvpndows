@@ -1,4 +1,4 @@
-# Removes the Gnosis VPN app and service. Keeps C:\ProgramData\GnosisVPN (the node identity and its funds).
+# Removes the Gnosis VPN app and service. Keeps C:\ProgramData\GnosisVPN and C:\ProgramData\gvpndows (the node identity, its funds, the logs).
 # Every step prints what it does and how long it took; no step waits without a limit.
 $ErrorActionPreference = "Continue"
 . (Join-Path $PSScriptRoot "common.ps1")
@@ -18,9 +18,9 @@ Remove-Item (Join-Path $env:ProgramFiles "Gnosis VPN") -Recurse -Force -ErrorAct
 Remove-Item (Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\Gnosis VPN.lnk") -ErrorAction SilentlyContinue
 Done
 
-Step "Removing the service files (C:\GnosisVPN)"
-Remove-Item C:\GnosisVPN -Recurse -Force -ErrorAction SilentlyContinue
-Done $(if (Test-Path C:\GnosisVPN) { "some files are still in use; they go after a restart" } else { "" })
+Step "Removing the service files ($SvcDir)"
+foreach ($d in $SvcDir, $LegacyDir) { Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue }
+Done $(if ((Test-Path $SvcDir) -or (Test-Path $LegacyDir)) { "some files are still in use; they go after a restart" } else { "" })
 
 Write-Host ("`nGnosis VPN removed in {0:0} s." -f ((Get-Date) - $script:t0).TotalSeconds)
 Write-Host "The node identity and its funds stay in C:\ProgramData\GnosisVPN (delete it only if its funds are gone)."

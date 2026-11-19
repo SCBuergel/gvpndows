@@ -1,6 +1,13 @@
 # Shared by install.ps1 and uninstall.ps1: visible, time-bounded steps (nothing waits silently).
 
 $script:t0 = Get-Date
+# The service lives under Program Files, which only administrators can create folders in: a folder
+# a standard user made first (C:\ is open to them) could keep a handle that survives an ACL reset.
+$script:SvcDir = Join-Path $env:ProgramFiles "Gnosis VPN Service"
+$script:SvcExe = Join-Path $script:SvcDir "gvpndows.exe"
+# Builds before 0.2.1 installed the service in C:\GnosisVPN; an update removes it.
+$script:LegacyDir = "C:\GnosisVPN"
+function Get-ServiceProcess { Get-Process gvpndows -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $script:SvcExe -or $_.Path -eq (Join-Path $script:LegacyDir "gvpndows.exe") } }
 
 # A click into a console window starts a QuickEdit selection, which pauses the script until Enter
 # is pressed (it looked like a hang). Turn QuickEdit off for this window only.
@@ -48,13 +55,13 @@ function Stop-GnosisService([int]$max = 30) {
   sc.exe stop GnosisVPN | Out-Null
   for ($i = 1; $i -le $max; $i++) {
     $st = (Get-Service GnosisVPN).Status
-    $proc = Get-Process gvpndows -ErrorAction SilentlyContinue | Where-Object Path -eq "C:\GnosisVPN\gvpndows.exe"
+    $proc = Get-ServiceProcess
     if ($st -eq "Stopped" -and -not $proc) { Write-Host ""; Done; return }
     Write-Host ("`r           waiting: {0,2} s, service {1}   " -f $i, $st) -NoNewline
     Start-Sleep 1
   }
   Write-Host ""
-  Get-Process gvpndows -ErrorAction SilentlyContinue | Where-Object Path -eq "C:\GnosisVPN\gvpndows.exe" | Stop-Process -Force
+  Get-ServiceProcess | Stop-Process -Force
   Start-Sleep 1
   Done "did not stop within $max s, so its process was ended"
 }

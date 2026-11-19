@@ -1,9 +1,9 @@
 //! Debug telemetry while a connection exists (connecting/connected/reconnecting), one row per
 //! second, so a stall can be lined up with what the core and the tunnel were doing:
-//!   %LOCALAPPDATA%\gvpndows\telemetry.csv  - connection state, the core's stall and PIX payment
+//!   gvpndows\telemetry.csv in the log folder (%ProgramData% for the service, else %LOCALAPPDATA%) - connection state, the core's stall and PIX payment
 //!       counters, packets each way through Wintun, drops, the reader backlog, and an in-tunnel
 //!       ICMP ping to the exit (10.128.0.1) with a 900 ms timeout
-//!   %LOCALAPPDATA%\gvpndows\nerdstats.jsonl - the core's NerdStats every 30 s and on each
+//!   gvpndows\nerdstats.jsonl next to it - the core's NerdStats every 30 s and on each
 //!       connection state change
 //! GVPNDOWS_TELEMETRY=0 turns it off. Each file is restarted when it passes 50 MB.
 

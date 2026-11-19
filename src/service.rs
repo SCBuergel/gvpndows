@@ -58,8 +58,8 @@ const FILE_SDDL: &str = "O:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)";
 
 /// Service and foreground server keep their state out of any user profile, in folders only SYSTEM
 /// and Administrators can read: they hold the node identity and its password (the wallet key).
-/// A folder someone else created first is taken over (owner reset to SYSTEM). Fails closed: if the
-/// folders cannot be secured, the service does not start.
+/// A folder (or link) someone else created first is never adopted: it is moved aside and a fresh one
+/// is created. Fails closed: if the folders cannot be secured, the service does not start.
 pub fn use_program_data() -> Result<(), String> {
     let pd = std::env::var_os("ProgramData").unwrap_or_else(|| "C:\\ProgramData".into());
     // SAFETY: called first thing in main, before any other thread exists.
@@ -362,10 +362,25 @@ fn serve_pipe() {
             unsafe { CloseHandle(h) };
             continue;
         }
+        // Every interactive user may connect; a bounded number of connections keeps one from
+        // making the SYSTEM service spawn threads without limit (the app needs two or three; the
+        // limit is generous because idle connections hold their slot).
+        if PIPE_CLIENTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= MAX_PIPE_CLIENTS {
+            PIPE_CLIENTS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            unsafe { CloseHandle(h) };
+            continue;
+        }
         let conn = PipeConn(h);
-        std::thread::spawn(move || client(conn));
+        std::thread::spawn(move || {
+            client(conn);
+            PIPE_CLIENTS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        });
     }
 }
+
+/// Open pipe connections, at most MAX_PIPE_CLIENTS at a time.
+static PIPE_CLIENTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+const MAX_PIPE_CLIENTS: usize = 64;
 
 /// Starts the core and the pipe server (background threads).
 /// DEBUG FEATURE ONLY: the app's "Send log to developer" (a no-op error in release builds).

@@ -16,23 +16,32 @@ Done
 Stop-App
 Stop-GnosisService 30
 
-Step "Installing the service in C:\GnosisVPN (changeable by administrators only)"
-New-Item -ItemType Directory -Force C:\GnosisVPN | Out-Null
-icacls C:\GnosisVPN /setowner "*S-1-5-32-544" /T /C /Q | Out-Null
-icacls C:\GnosisVPN /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX" /C /Q | Out-Null
-Copy-Item (Join-Path $here "service\gvpndows.exe") C:\GnosisVPN\gvpndows.exe -Force
-Copy-Item (Join-Path $here "service\gnosis") C:\GnosisVPN -Recurse -Force
-icacls C:\GnosisVPN\* /reset /T /C /Q | Out-Null
-if ((Get-FileHash (Join-Path $here "service\gvpndows.exe")).Hash -ne (Get-FileHash C:\GnosisVPN\gvpndows.exe).Hash) { throw "C:\GnosisVPN\gvpndows.exe is not the new build" }
-$weak = icacls C:\GnosisVPN /T | Select-String "(Users|Authenticated Users|Everyone|INTERACTIVE):\(.*(F|M|W)\)"
-if ($weak) { throw "C:\GnosisVPN is writable by non-admins: $weak" }
+Step "Installing the service in $SvcDir (changeable by administrators only)"
+New-Item -ItemType Directory -Force $SvcDir | Out-Null
+icacls $SvcDir /setowner "*S-1-5-32-544" /T /C /Q | Out-Null
+icacls $SvcDir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX" /C /Q | Out-Null
+Copy-Item (Join-Path $here "service\gvpndows.exe") $SvcExe -Force
+Copy-Item (Join-Path $here "service\gnosis") $SvcDir -Recurse -Force
+icacls "$SvcDir\*" /reset /T /C /Q | Out-Null
+if ((Get-FileHash (Join-Path $here "service\gvpndows.exe")).Hash -ne (Get-FileHash $SvcExe).Hash) { throw "$SvcExe is not the new build" }
+$weak = icacls $SvcDir /T | Select-String "(Users|Authenticated Users|Everyone|INTERACTIVE):\(.*(F|M|W)\)"
+if ($weak) { throw "$SvcDir is writable by non-admins: $weak" }
+$bin = '"' + $SvcExe + '" --service'
 if (-not (Get-Service GnosisVPN -ErrorAction SilentlyContinue)) {
-  New-Service -Name GnosisVPN -BinaryPathName '"C:\GnosisVPN\gvpndows.exe" --service' -DisplayName "Gnosis VPN" -StartupType Automatic -Description "Runs the Gnosis VPN client core and the tunnel for the Gnosis VPN app. It never connects by itself." | Out-Null
+  New-Service -Name GnosisVPN -BinaryPathName $bin -DisplayName "Gnosis VPN" -StartupType Automatic -Description "Runs the Gnosis VPN client core and the tunnel for the Gnosis VPN app. It never connects by itself." | Out-Null
+} else {
+  sc.exe config GnosisVPN binPath= $bin | Out-Null   # an update may move it from the old folder
 }
 # starts with Windows (delayed, after the network), restarted if it ever crashes; connecting stays the app's job
 sc.exe config GnosisVPN start= delayed-auto | Out-Null
 sc.exe failure GnosisVPN reset= 86400 actions= restart/5000/restart/30000/restart/60000 | Out-Null
-Done ("build " + (Get-FileHash C:\GnosisVPN\gvpndows.exe).Hash.Substring(0, 16))
+Done ("build " + (Get-FileHash $SvcExe).Hash.Substring(0, 16))
+
+if (Test-Path $LegacyDir) {
+  Step "Removing the old service folder $LegacyDir"
+  Remove-Item $LegacyDir -Recurse -Force -ErrorAction SilentlyContinue
+  Done $(if (Test-Path $LegacyDir) { "some files are still in use; delete it after a restart" } else { "" })
+}
 
 Step "Installing the app in $app, with a Start menu entry"
 if (Test-Path $app) { Remove-Item $app -Recurse -Force }

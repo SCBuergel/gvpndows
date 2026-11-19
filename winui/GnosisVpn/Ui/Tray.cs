@@ -156,7 +156,7 @@ public sealed class TrayFlyoutWindow : Window
     public void Refresh() { root.Children.Clear(); root.Children.Add(Tray.FlyoutContent(w, Close)); }
 }
 
-/// <summary>Toasts (Windows App SDK app notifications) for the demo's notification rules; missed
+/// <summary>Toasts (Windows App SDK app notifications) for the app's notifications (connection changes, low data); missed
 /// ones wait in Notification Center. Buttons run the same actions as in the app.</summary>
 public static class Notify
 {

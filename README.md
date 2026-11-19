@@ -15,7 +15,7 @@ Gnosis VPN for Windows, built step by step (same approach as the Android app in 
 
     WinUI app (GnosisVPN.exe, the signed-in user, unelevated)
         |  \\.\pipe\gnosisvpn, one JSON request per line
-    service "GnosisVPN" (C:\GnosisVPN\gvpndows.exe --service, LocalSystem)
+    service "GnosisVPN" (%ProgramFiles%\Gnosis VPN Service\gvpndows.exe --service, LocalSystem)
         |  client core (gnosis_vpn-lib) + Wintun adapter "GnosisVPN" + routes
     HOPR network -> exit
 
@@ -90,10 +90,11 @@ Test builds contain a **debug-only developer relay**: the service streams its lo
 encrypted to the developer's key) to a private ntfy.sh topic, at most 240 messages per client, and
 sends an encrypted backup of the node identity once. This must not ship. For a release:
 
-1. Build **without** `--features debug-relay`: run `scripts/do-build/build-remote.sh` with
-   `FEATURES=` (empty) and `GVPNDOWS_RELEASE=1`. The feature is off by default; with
-   `GVPNDOWS_RELEASE` set, a build that still has it fails to compile.
-2. Leave `GVPNDOWS_NTFY_TOPIC` and `GVPNDOWS_BACKUP_PUBKEY` unset.
+1. Build **without** `--features debug-relay`: `RELEASE=1 scripts/do-build/run.sh` (or
+   `RELEASE=1 scripts/do-build/rebuild.sh` on a kept droplet). It passes `FEATURES=` (empty) and
+   `GVPNDOWS_RELEASE=1` to the droplet build; with `GVPNDOWS_RELEASE` set, a build that still has
+   the feature fails to compile.
+2. `RELEASE=1` also leaves `GVPNDOWS_NTFY_TOPIC` and `GVPNDOWS_BACKUP_PUBKEY` unset.
 3. Check: the service's `x_state` reports `"debug_relay": false`, its log has no
    "DEBUG BUILD" line, and the app shows no "Send log to developer (debug build)" button.
 

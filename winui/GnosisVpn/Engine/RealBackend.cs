@@ -111,7 +111,7 @@ public static class ServiceCheck
     }
 }
 
-/// <summary>Drives the UI's state (the fake engine's <see cref="State"/>) from the real core: run
+/// <summary>Drives the UI's state (<see cref="State"/>) from the real core: run
 /// mode → which screen, the destination list → exits, the connection and its PIX payment state →
 /// status, data left and messages. Connect, Disconnect and exit picks go to the service; every other
 /// action stays in the UI. Numbers the core does not report (latency, load) are left neutral.</summary>
