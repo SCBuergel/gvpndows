@@ -32,9 +32,10 @@ Gnosis VPN for Windows, built step by step (same approach as the Android app in 
   - DNS: while the tunnel's routes are up, a WFP filter lets DNS (port 53) out only through the
     tunnel or loopback, as upstream sends all queries to the tunnel (`~.`). It lives in a dynamic
     WFP session, so it goes with the routes or when the service dies. Other ports (DoH) are not covered.
-  - The service never connects on its own. It starts the core at once and retries every 10 s until
+  - The service never connects at start. It starts the core at once and retries every 10 s until
     the network allows it (Blokli must be reachable). When the core ends on its own (a final connect
-    error, Blokli moved), it starts it again, after 5 s and backing off to 5 minutes.
+    error, Blokli moved), it starts it again, after 5 s and backing off to 5 minutes, and the new
+    core resumes the connection the user last asked for, unless they disconnected since.
   - Start type: `dist/windows/install.ps1` (the user install) makes it start with Windows (delayed)
     and restart after a crash.
   - `--serve` runs the same in an elevated console. The app then needs `GNOSISVPN_TRUST_PIPE=1`,
