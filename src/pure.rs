@@ -88,6 +88,28 @@ pub fn missing_tunnel_routes(present: &[(u64, std::net::IpAddr, u8)], tun_luid: 
     TUNNEL_ROUTES.into_iter().filter(|&(d, l)| !present.contains(&(tun_luid, d, l))).collect()
 }
 
+/// How long a peer IP keeps its bypass route after the core last listed it (upstream's
+/// PEER_IP_HYSTERESIS_SECS).
+pub const PEER_IP_HYSTERESIS_MS: u64 = 300_000;
+
+/// Peer bypass bookkeeping for one update: records `listed` as seen at `now` (ms) in `seen`, forgets
+/// IPs not listed for longer than the hysteresis, and returns (to add, to remove) against the IPs
+/// with a bypass route. `always` (Blokli, the debug relay) stay alive whether listed or not.
+pub fn reconcile_peers(
+    seen: &mut std::collections::BTreeMap<Ipv4Addr, u64>,
+    listed: &[Ipv4Addr],
+    always: &[Ipv4Addr],
+    bypassed: &std::collections::BTreeSet<Ipv4Addr>,
+    now: u64,
+) -> (Vec<Ipv4Addr>, Vec<Ipv4Addr>) {
+    for ip in listed {
+        seen.insert(*ip, now);
+    }
+    seen.retain(|_, t| now.saturating_sub(*t) <= PEER_IP_HYSTERESIS_MS);
+    let alive: std::collections::BTreeSet<Ipv4Addr> = seen.keys().chain(always).copied().collect();
+    (alive.difference(bypassed).copied().collect(), bypassed.difference(&alive).copied().collect())
+}
+
 /// Private and link-local ranges routed outside the tunnel via the WAN gateway (as upstream).
 pub const BYPASS_LANS: [(std::net::Ipv4Addr, u8); 4] = [
     (std::net::Ipv4Addr::new(10, 0, 0, 0), 8),

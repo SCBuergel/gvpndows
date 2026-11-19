@@ -154,6 +154,8 @@ pub struct Root {
     wan: Option<(u64, IpAddr)>,
     bypass: Vec<net::Route>,
     bypass_peers: BTreeSet<Ipv4Addr>,
+    /// When the core last listed each peer IP (ms, see `now_ms`); unlisted for 300 s, its route goes.
+    peer_seen: std::collections::BTreeMap<Ipv4Addr, u64>,
     /// Recorded bypass routes of an earlier run that could not be removed at start: ours.
     stale_bypass: Vec<net::Route>,
     tunnel_routes: Vec<net::Route>,
@@ -260,32 +262,72 @@ impl Root {
         self.bypass_peers.clear();
     }
 
-    /// Adds the bypass routes still missing for `peers` (and the LAN ranges); returns how many peers were new.
-    fn add_bypass_peers(&mut self, peers: BTreeSet<Ipv4Addr>, wan: (u64, IpAddr)) -> usize {
-        let new: Vec<Ipv4Addr> = peers.difference(&self.bypass_peers).copied().collect();
-        for p in &new {
-            self.add_bypass(IpAddr::V4(*p), 32, wan);
+    /// Brings the peer bypass routes in line with the core's `listed` peer IPs (plus Blokli and the
+    /// debug relay, always kept): adds the missing ones and removes those of IPs unlisted for 300 s,
+    /// then the LAN ranges; returns how many peer routes were added.
+    fn add_bypass_peers(&mut self, listed: &[Ipv4Addr], wan: (u64, IpAddr)) -> usize {
+        let always: Vec<Ipv4Addr> = self.blokli_ip.into_iter().chain(self.service_ips.iter().copied()).collect();
+        let (add, gone) = crate::pure::reconcile_peers(&mut self.peer_seen, listed, &always, &self.bypass_peers, now_ms());
+        if !gone.is_empty() {
+            self.remove_peer_bypass(&gone);
         }
-        self.bypass_peers.extend(new.iter().copied());
+        let mut added = 0;
+        for p in add {
+            // a failed add stays unmarked, so the next update retries it
+            if self.add_bypass(IpAddr::V4(p), 32, wan) {
+                self.bypass_peers.insert(p);
+                added += 1;
+            }
+        }
         if !self.bypass.iter().any(|r| r.prefix_len < 32) {
             for (net, l) in crate::pure::BYPASS_LANS {
                 self.add_bypass(IpAddr::V4(net), l, wan);
             }
         }
-        new.len()
+        added
     }
 
-    fn add_bypass(&mut self, dest: IpAddr, len: u8, wan: (u64, IpAddr)) {
+    /// Deletes our /32 bypass routes to `ips`; one that cannot be deleted stays ours and marked,
+    /// so the next update tries again.
+    fn remove_peer_bypass(&mut self, ips: &[Ipv4Addr]) {
+        let mut keep = Vec::new();
+        for r in self.bypass.drain(..) {
+            let IpAddr::V4(d) = r.dest else { keep.push(r); continue };
+            if r.prefix_len != 32 || !ips.contains(&d) {
+                keep.push(r);
+            } else if let Err(e) = net::delete_route(&r) {
+                log::line(format!("bypass: {e}"));
+                keep.push(r);
+            } else {
+                self.bypass_peers.remove(&d);
+            }
+        }
+        self.bypass = keep;
+        let mut ours = self.bypass.clone();
+        ours.extend(self.stale_bypass.iter().cloned());
+        record_bypass(&ours, false);
+        log::line(format!("bypass: removed the routes of {} peers no longer listed", ips.len()));
+    }
+
+    /// Adds a bypass route; true when it is in place and ours (an Err or another's route: false).
+    fn add_bypass(&mut self, dest: IpAddr, len: u8, wan: (u64, IpAddr)) -> bool {
         let r = net::Route { if_luid: wan.0, dest, prefix_len: len, next_hop: wan.1 };
         match net::add_route(&r) {
             Ok(true) => {
                 record_bypass(&[r.clone()], true);
                 self.bypass.push(r);
+                true
             }
             // already there: ours if an earlier run recorded it and the sweep could not remove it
-            Ok(false) if self.stale_bypass.iter().any(|s| rec(s) == rec(&r)) => self.bypass.push(r),
-            Ok(false) => {} // not ours
-            Err(e) => log::line(format!("bypass: {e}")),
+            Ok(false) if self.stale_bypass.iter().any(|s| rec(s) == rec(&r)) => {
+                self.bypass.push(r);
+                true
+            }
+            Ok(false) => false, // not ours
+            Err(e) => {
+                log::line(format!("bypass: {e}"));
+                false
+            }
         }
     }
 
@@ -296,17 +338,12 @@ impl Root {
         let wan = self.wan(tun_luid)?;
 
         // 1. Bypass routes first, so HOPR connections never take the tunnel they carry.
-        let mut peers: BTreeSet<Ipv4Addr> = peer_ips.iter().copied().collect();
-        if let Some(b) = self.blokli_ip {
-            peers.insert(b);
-        }
         if self.service_ips.is_empty() && self.tunnel_routes.is_empty() {
             // not resolved at start (no network yet): try again while DNS still goes direct
             let hosts = crate::relay::bypass_hosts();
             self.service_ips = hosts.iter().flat_map(|h| resolve_v4(h)).collect();
         }
-        peers.extend(self.service_ips.iter().copied());
-        self.add_bypass_peers(peers, wan);
+        self.add_bypass_peers(peer_ips, wan);
 
         // 2. Address, MTU, metric.
         let adapter = self.adapter.as_mut().expect("adapter");
@@ -363,11 +400,7 @@ impl Root {
         }
         let Some(tun_luid) = self.adapter.as_ref().map(|a| a.luid) else { return };
         let Ok(wan) = self.wan(tun_luid) else { return };
-        // all of them, as a WAN change removed the bypass routes
-        let mut peers: BTreeSet<Ipv4Addr> = peer_ips.iter().copied().collect();
-        peers.extend(self.blokli_ip);
-        peers.extend(self.service_ips.iter().copied());
-        let new = self.add_bypass_peers(peers, wan);
+        let new = self.add_bypass_peers(peer_ips, wan);
         if new > 0 {
             log::line(format!("bypass: {new} new peer routes"));
         }
@@ -384,6 +417,7 @@ impl Root {
             }
         }
         self.remove_bypass();
+        self.peer_seen.clear();
         log::line("tunnel routes removed");
     }
 
@@ -396,6 +430,12 @@ impl Root {
             log::line("tunnel adapter removed");
         }
     }
+}
+
+/// Milliseconds since the first call (a monotonic clock for the peer expiry).
+fn now_ms() -> u64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64
 }
 
 fn rec(r: &net::Route) -> crate::pure::BypassRec {
