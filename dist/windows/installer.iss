@@ -49,7 +49,7 @@ Source: "{#Payload}\common.ps1"; DestDir: "{app}\setup"; Flags: ignoreversion
 Filename: "{commonpf64}\Gnosis VPN\GnosisVPN.exe"; Description: "Start Gnosis VPN"; Flags: postinstall nowait runasoriginaluser skipifsilent; Check: InstallOk
 
 [UninstallRun]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup\uninstall.ps1"""; Flags: runhidden waituntilterminated; RunOnceId: "GnosisVPNUninstall"
+Filename: "{cmd}"; Parameters: "/c ""set ""PSModulePath="" && ""{sys}\WindowsPowerShell\v1.0\powershell.exe"" -NoProfile -ExecutionPolicy Bypass -File ""{app}\setup\uninstall.ps1"""""; Flags: runhidden waituntilterminated; RunOnceId: "GnosisVPNUninstall"
 
 [Code]
 // install.ps1 does the work (service, app, permissions, start); its output goes to a log under
@@ -81,7 +81,9 @@ begin
     WizardForm.StatusLabel.Caption := 'Installing the Gnosis VPN service and app...';
     // -File, not -Command: a path inside a command string breaks on a user name with an apostrophe.
     // An error in install.ps1 ends powershell with exit code 1; cmd.exe passes it on.
-    Cmd := '/c ""' + ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe') + '" -NoProfile -ExecutionPolicy Bypass -File "' + Script + '" -NoLaunch > "' + Log + '" 2>&1"';
+    // PSModulePath is cleared: started from PowerShell 7, Windows PowerShell would inherit its
+    // module path and fail to load its own modules (Get-Acl).
+    Cmd := '/c "set "PSModulePath=" && "' + ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe') + '" -NoProfile -ExecutionPolicy Bypass -File "' + Script + '" -NoLaunch > "' + Log + '" 2>&1"';
     if not Exec(ExpandConstant('{cmd}'), Cmd,
         ExpandConstant('{tmp}\GnosisVPN'), SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
     begin
