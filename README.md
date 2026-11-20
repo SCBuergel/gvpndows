@@ -203,9 +203,10 @@ Everything that belongs to the relay is marked `DEBUG FEATURE ONLY`: `src/relay.
 `scripts/do-build/run.sh` builds the service on a temporary DigitalOcean droplet with cargo-xwin
 (cross-compiling to Windows), runs the unit tests and a Wine smoke test, copies `gvpndows.exe` to
 `out/`, and deletes the droplet; a deletion deadline also deletes it if the script dies. It needs a
-DigitalOcean token in `~/do-api-token` (or `DO_TOKEN_FILE`). It makes a debug build (with the
-relay topic and backup key from the environment, `GVPNDOWS_NTFY_TOPIC` and `GVPNDOWS_BACKUP_PUBKEY`)
-unless `RELEASE=1` is set. Only files git tracks are uploaded. `KEEP=1` keeps the droplet for `rebuild.sh` until `down.sh`. The app has no equivalent: it builds
+DigitalOcean token in `~/do-api-token` (or `DO_TOKEN_FILE`). It makes a debug build unless
+`RELEASE=1` is set; the debug build takes the relay topic from
+`~/.config/gvpndows-secrets/ntfy-topic` and the public backup key from
+`~/.config/gvpndows-secrets/backup-x25519.pub` (without them it has no relay). Only files git tracks are uploaded. `KEEP=1` keeps the droplet for `rebuild.sh` until `down.sh`. The app has no equivalent: it builds
 on Windows only (GitHub Actions or `scripts/aws/winui-build.sh`).
 
 ## Test

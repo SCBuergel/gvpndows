@@ -35,8 +35,7 @@ assert "secrets." not in wf, "the workflow must not read secrets (a debug build 
 assert "--features" not in wf, "CI must not enable features (debug-relay)"
 assert "GVPNDOWS_RELEASE=1" in wf
 # the patched crates are hash-checked
-seg = wf[wf.index("crate-patches"):wf.index("cargo build")]
-assert "sha256sum -c" in seg.split("static.crates.io")[1], "patched crates are not hash-checked"
+assert re.search(r'echo "\$sum  \$cv\.crate" \| sha256sum -c\n\s*tar -xzf "\$cv\.crate"', wf), "patched crates are not hash-checked before unpacking"
 
 # the installer runs install.ps1 (with -File) and its uninstaller runs uninstall.ps1
 assert re.search(r'-File "\' \+ Script \+ \'" -NoLaunch', iss), "installer.iss does not run install.ps1 -NoLaunch with -File"

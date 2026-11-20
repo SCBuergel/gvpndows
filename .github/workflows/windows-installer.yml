@@ -134,7 +134,7 @@ jobs:
           timeout 120 out/gvpndows.exe --selftest
           tail -20 "$log"
           grep -q "selftest ok" "$log"
-          ! grep -E "selftest: (key error|config parser error)|DEBUG BUILD" "$log"
+          if grep -E "selftest: (key error|config parser error)|DEBUG BUILD" "$log"; then exit 1; fi
       - uses: actions/upload-artifact@v4
         with: { name: service, path: out, retention-days: 7 }
 
@@ -219,8 +219,9 @@ jobs:
           $u = (Get-ChildItem HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall | Get-ItemProperty | Where-Object DisplayName -eq "Gnosis VPN").UninstallString
           if (-not $u) { throw "no uninstall entry" }
           $p = Start-Process $u.Trim('"') -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -PassThru -Wait
-          Start-Sleep 5
           if ($p.ExitCode -ne 0) { throw "uninstall exit $($p.ExitCode)" }
+          # the uninstaller continues from a copy of itself in the temp folder: wait for its result
+          foreach ($i in 1..60) { if (-not (Test-Path "${env:ProgramFiles}\Gnosis VPN Service")) { break }; Start-Sleep 1 }
           if (Get-Service GnosisVPN -ErrorAction SilentlyContinue) { throw "service still installed" }
           if (Test-Path "${env:ProgramFiles}\Gnosis VPN") { throw "app still installed" }
           if (Test-Path "${env:ProgramFiles}\Gnosis VPN Service") { throw "service folder still there" }
