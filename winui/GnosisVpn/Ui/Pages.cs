@@ -33,7 +33,7 @@ public sealed class Pages
         var sb = new StringBuilder(route).Append('|');
         void A(object? o) => sb.Append(o).Append(';');
         A(S.Conn); A(S.Loc); A(S.Mode); A(Mb(S.Balance)); A(S.Simple); A(S.Details); A(S.Icons);
-        A(S.Q); A(S.Ptab); A(S.Pall); A(w.U.MoreMsgs); A(w.U.Mode); A(w.U.KeepTray); A(w.U.StartWin); A(w.U.StartMin);
+        A(S.Q); A(S.Ptab); A(S.Pall); A(w.U.MoreMsgs); A(w.U.Mode); A(w.U.KeepTray); A(w.U.StartWin); A(w.U.StartMin); A(exporting);
         A(R.NodeAddress); A(R.NeedWx); A(R.NeedXdai); A(R.HaveWx); A(R.HaveXdai);
         foreach (var kv in S.Alloc.OrderBy(k => k.Key)) A(kv.Key + "=" + Math.Round(kv.Value / 10));
         foreach (var e in G.EX) A(e.Id + G.GradeOf(e).K + G.GradeOf(e).N + e.Ping / 50);
@@ -458,6 +458,27 @@ public sealed class Pages
     }
 
     // =============================== SETTINGS ===============================
+    static bool exporting;
+    static string Version()
+    {
+        var ver = System.Reflection.CustomAttributeExtensions.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(typeof(App).Assembly)?.InformationalVersion ?? "?";
+        var plus = ver.IndexOf('+'); return plus > 0 ? ver[..Math.Min(ver.Length, plus + 8)] : ver;
+    }
+    async void ExportLogs()
+    {
+        if (exporting) return;
+        exporting = true; w.Render();
+        try
+        {
+            var (path, service, why) = await LogExport.Run(R.LastStatus, Version());
+            App.Log($"logs exported to {path}" + (service ? "" : $" without the service log: {why}"));
+            w.ShowSnack(service ? $"Logs saved to Downloads: {System.IO.Path.GetFileName(path)}" : $"Saved without the service's log ({why}): {System.IO.Path.GetFileName(path)}");
+            try { System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{path}\""); } catch { }
+        }
+        catch (Exception e) { App.Log("log export: " + e); w.ShowSnack("Could not export the logs: " + e.Message); }
+        finally { exporting = false; w.Render(); }
+    }
+
     UIElement Settings()
     {
         var e = G.Ex(S.Loc);
@@ -473,10 +494,12 @@ public sealed class Pages
             Card("monitoring", "Detailed metrics", "Ping, route quality and the exit table.", Toggle(!S.Simple, () => Act("view"), "Detailed metrics")),
             Card("person", "Exit icons", null, Combo(new[] { ("country", "Country"), ("node", "Node icon"), ("flag", "Flags"), ("none", "None") }, S.Icons, v => Act("icons", v: v))),
             Card("public", "App theme", null, Combo(new[] { ("system", "Use system setting"), ("light", "Light"), ("dark", "Dark") }, w.U.Mode, v => { w.U.Mode = v; Prefs.Save("mode", v); w.Render(); }))));
+        p.Children.Add(Section("Logs"));
+        p.Children.Add(Grp(Card("download", "Export logs",
+            "Saves one zip to your Downloads folder with the app's and the service's logs, the HOPR node's included (asks for administrator approval for the service's part). It contains your VPN address and connection details, not your node's keys.",
+            Btn(exporting ? "Exporting…" : "Export", ExportLogs, disabled: exporting))));
         p.Children.Add(Section("About"));
-        var ver = System.Reflection.CustomAttributeExtensions.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(typeof(App).Assembly)?.InformationalVersion ?? "?";
-        var plus = ver.IndexOf('+'); if (plus > 0) ver = ver[..Math.Min(ver.Length, plus + 8)];
-        p.Children.Add(Grp(Card("vpn_key", "Gnosis VPN", $"App {ver} · prototype", null),
+        p.Children.Add(Grp(Card("vpn_key", "Gnosis VPN", $"App {Version()} · prototype", null),
             Card("warning", "Prototype, for testing only", "Not a finished or supported product, and not security-audited. There is no kill switch, so it may expose your traffic; it spends real funds on Gnosis Chain. Use small amounts, and do not rely on it to protect your identity or your data. No warranty (GNU GPL v3.0).", null)));
         return p;
     }

@@ -265,8 +265,12 @@ public sealed class RealBackend
         S.Conn = "idle"; S.ConnSec = 0; S.EmptyIn = null; pendingConnect = null; attemptDest = null; S.Alloc.Clear();
     }
 
+    /// <summary>The service's last status reply, for the log export.</summary>
+    public string? LastStatus { get; private set; }
+
     void Apply(JsonNode? st, JsonNode? bal)
     {
+        if (st != null) LastStatus = st.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
         var S = g.S;
         // one missed poll is not enough to show the connection as gone
         missed = st == null ? missed + 1 : 0;

@@ -204,7 +204,7 @@ public sealed partial class MainWindow : Window
         foreach (var (k, el) in live)
         {
             if (el is TextBlock tb) { var v = Val(k); if (v != null && tb.Text != v) tb.Text = v; }
-            else if (el is ProgressBar pb) { var v = Num(k); if (v != null) pb.Value = v.Value; }
+            else if (el is Ui.Meter m) { var v = Num(k); if (v != null) m.Value = v.Value; }
             else if (el is Microsoft.UI.Xaml.Documents.Run run) { var v = Val(k); if (v != null && run.Text != v) run.Text = v; }
         }
     }

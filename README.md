@@ -92,6 +92,11 @@ logs in `C:\ProgramData`.
 - **Logs:** the service writes `C:\ProgramData\gvpndows\gvpndows.log` (readable by administrators;
   past 20 MB it moves to `gvpndows.old.log`), the app writes `%LOCALAPPDATA%\GnosisVPN\ui.log`. The
   installer's own steps are in `C:\Program Files\Gnosis VPN Service\setup\install.log`.
+  **Settings > Logs > Export** puts all of them, plus the app's last status, into one
+  `GnosisVPN-logs-<time>.zip` in your Downloads folder; it asks for administrator approval to add
+  the service's log (which also holds the HOPR node's log). Without approval the zip has only the
+  app's part. The node's keys are never included, but the logs show your VPN address and
+  connection details: share them only with someone you trust.
 - **Debug builds** have a **Send log to developer** button; release builds have none (see
   [Release and debug builds](#release-and-debug-builds)).
 

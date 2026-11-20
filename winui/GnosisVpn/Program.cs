@@ -12,6 +12,7 @@ public static class Program
     static int Main(string[] args)
     {
         if (Array.IndexOf(args, "--selftest") >= 0) return Testing.SelfTest.Run(args);
+        if (Array.IndexOf(args, "--export-logs") >= 0) return LogExport.RunElevated(args);   // Settings > Logs, elevated
         WinRT.ComWrappersSupport.InitializeComWrappers();
         Application.Start(p =>
         {

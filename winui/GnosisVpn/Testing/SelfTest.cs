@@ -67,6 +67,15 @@ public static class SelfTest
         rb.ApplyForTest(State("{\"type\":\"running\"}", connected.Replace("\"bytes_left\":639202344", "\"bytes_left\":639202344,\"empty_in\":1080000")), null);
         Check(g.S.EmptyIn == 1080 && Ui.Pages.Expiry(g) == "Expires in 18 min · 639 MB left · Auto-renew on", "expiry line from pix.empty_in");
         Check(g.EX[0].Cc == "DE" && g.EX[2].Country == "Kenya" && RealBackend.CountryName("KE") == "Kenya" && RealBackend.CountryName("") == "Unknown", "country names for any ISO code (KE is Kenya)");
+        Check(LogExport.RunElevated(new[] { "--export-logs", System.IO.Path.Combine(System.IO.Path.GetTempPath(), "other.zip") }) == 3
+              && LogExport.RunElevated(new[] { "--export-logs", System.IO.Path.Combine(System.IO.Path.GetTempPath(), "GnosisVPN-logs-missing.zip") }) == 3, "elevated log export touches only an existing GnosisVPN-logs-*.zip");
+        {
+            var z = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"GnosisVPN-logs-selftest-{Environment.ProcessId}.zip");
+            using (System.IO.Compression.ZipFile.Open(z, System.IO.Compression.ZipArchiveMode.Create)) { }
+            var rc = LogExport.RunElevated(new[] { "--export-logs", z });
+            Check(rc == 0, $"elevated log export adds to the zip (rc {rc})");
+            System.IO.File.Delete(z);
+        }
         Check(AppEngine.FundingUrl("0x976909B05A46B60c0944b1afDFfb611d4C9D0d06") == "https://funding.vpn.gnosis.eth.limo/?address=0x976909B05A46B60c0944b1afDFfb611d4C9D0d06"
               && AppEngine.FundingUrl("") == null && AppEngine.FundingUrl("0x12&x=1") == null, "funding portal link carries the VPN address");
         Check(g.ExOrNull("gvpn-lt-1-ynm1")?.Ping == 74, "ping from tunnel_ping_rtt");

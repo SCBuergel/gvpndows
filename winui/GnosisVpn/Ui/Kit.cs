@@ -284,8 +284,26 @@ public static class Kit
     public static Border Box(UIElement child, string bg = "card", double pad = 16, double radius = 6)
         => new() { Background = Theme.Br(bg), BorderBrush = Theme.Br("card-bd"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(radius), Padding = new Thickness(pad), Child = child };
 
-    public static ProgressBar Bar(double pct, string color = "accent", double height = 3)
-        => new() { Value = pct, Maximum = 100, Height = height, MinHeight = height, Foreground = Theme.Br(color), Background = Theme.Br("track"), CornerRadius = new CornerRadius(height / 2) };
+    /// <summary>A plain percentage bar (0..100). Not a ProgressBar: that one animates its fill in from
+    /// the left whenever it is created, so every page rebuild replayed the animation.</summary>
+    public static Meter Bar(double pct, string color = "accent", double height = 3) => new(pct, Theme.Br(color), Theme.Br("track"), height);
+}
+
+/// <summary>A static bar: the track, and a fill as wide as the value; changes are applied at once.</summary>
+public sealed class Meter : Grid
+{
+    readonly Border fill;
+    double v;
+    public Meter(double pct, Brush fg, Brush track, double height)
+    {
+        Height = height; MinHeight = height; Background = track; CornerRadius = new CornerRadius(height / 2);
+        fill = new Border { Background = fg, CornerRadius = new CornerRadius(height / 2), HorizontalAlignment = HorizontalAlignment.Left, Width = 0 };
+        Children.Add(fill);
+        SizeChanged += (_, _) => Apply();
+        Value = pct;
+    }
+    public double Value { get => v; set { v = Math.Clamp(double.IsNaN(value) ? 0 : value, 0, 100); Apply(); } }
+    void Apply() => fill.Width = Math.Max(0, ActualWidth * v / 100);
 }
 
 /// <summary>Small looping animations (checking bars, spinning status icon, blinking dots).</summary>
