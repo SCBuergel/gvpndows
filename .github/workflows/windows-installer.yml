@@ -207,27 +207,34 @@ jobs:
           }
           if (Select-String -Path pkg\GnosisVPN\service\gvpndows.exe -Pattern "streams its log, encrypted, to the developer" -SimpleMatch -Quiet) { throw "the service is a debug build (it has the developer relay)" }
           "package ok"
+      - uses: actions/upload-artifact@v4
+        with: { name: GnosisVPN-windows, path: release, retention-days: 30 }
       - name: Install, check and uninstall on this runner
         shell: pwsh
         run: |
-          $exe = "release\GnosisVPN-Setup-$env:VERSION.exe"
-          $p = Start-Process $exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$PWD\setup.log" -PassThru -Wait
-          Get-Content "${env:ProgramFiles}\Gnosis VPN Service\setup\install.log" -ErrorAction SilentlyContinue
-          if ($p.ExitCode -ne 0) { Get-Content setup.log -Tail 30; throw "setup exit $($p.ExitCode)" }
-          if ((Get-Service GnosisVPN).Status -ne "Running") { throw "service not running" }
-          if (-not (Test-Path "${env:ProgramFiles}\Gnosis VPN\GnosisVPN.exe")) { throw "app not installed" }
-          $u = (Get-ChildItem HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall | Get-ItemProperty | Where-Object DisplayName -eq "Gnosis VPN").UninstallString
-          if (-not $u) { throw "no uninstall entry" }
-          $p = Start-Process $u.Trim('"') -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -PassThru -Wait
-          if ($p.ExitCode -ne 0) { throw "uninstall exit $($p.ExitCode)" }
-          # the uninstaller continues from a copy of itself in the temp folder: wait for its result
-          foreach ($i in 1..60) { if (-not (Test-Path "${env:ProgramFiles}\Gnosis VPN Service")) { break }; Start-Sleep 1 }
-          if (Get-Service GnosisVPN -ErrorAction SilentlyContinue) { throw "service still installed" }
-          if (Test-Path "${env:ProgramFiles}\Gnosis VPN") { throw "app still installed" }
-          if (Test-Path "${env:ProgramFiles}\Gnosis VPN Service") { throw "service folder still there" }
-          "install and uninstall ok"
-      - uses: actions/upload-artifact@v4
-        with: { name: GnosisVPN-windows, path: release, retention-days: 30 }
+          try {
+            $exe = "release\GnosisVPN-Setup-$env:VERSION.exe"
+            $p = Start-Process $exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$PWD\setup.log" -PassThru -Wait
+            Get-Content "${env:ProgramFiles}\Gnosis VPN Service\setup\install.log" -ErrorAction SilentlyContinue
+            if ($p.ExitCode -ne 0) { Get-Content setup.log -Tail 30; throw "setup exit $($p.ExitCode)" }
+            if ((Get-Service GnosisVPN).Status -ne "Running") { throw "service not running" }
+            if (-not (Test-Path "${env:ProgramFiles}\Gnosis VPN\GnosisVPN.exe")) { throw "app not installed" }
+            $u = (Get-ChildItem HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall | Get-ItemProperty | Where-Object DisplayName -eq "Gnosis VPN").UninstallString
+            if (-not $u) { throw "no uninstall entry" }
+            $p = Start-Process $u.Trim('"') -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -PassThru -Wait
+            if ($p.ExitCode -ne 0) { throw "uninstall exit $($p.ExitCode)" }
+            # the uninstaller continues from a copy of itself in the temp folder: wait for its result
+            foreach ($i in 1..60) { if (-not (Test-Path "${env:ProgramFiles}\Gnosis VPN Service")) { break }; Start-Sleep 1 }
+            if (Get-Service GnosisVPN -ErrorAction SilentlyContinue) { throw "service still installed" }
+            if (Test-Path "${env:ProgramFiles}\Gnosis VPN") { throw "app still installed" }
+            if (Test-Path "${env:ProgramFiles}\Gnosis VPN Service") { throw "service folder still there" }
+            "install and uninstall ok"
+          } catch {
+            $msg = "$_`n--- install.log`n" + ((Get-Content "${env:ProgramFiles}\Gnosis VPN Service\setup\install.log" -ErrorAction SilentlyContinue | Select-Object -Last 25) -join "`n") + "`n--- setup.log`n" + ((Get-Content setup.log -ErrorAction SilentlyContinue | Select-Object -Last 15) -join "`n") + "`n--- service log`n" + ((Get-Content C:\ProgramData\gvpndows\gvpndows.log -ErrorAction SilentlyContinue | Select-Object -Last 15) -join "`n")
+            $msg
+            "::error title=install test::" + ($msg -replace '%','%25' -replace "`r",'' -replace "`n",'%0A')
+            exit 1
+          }
       - name: GitHub release (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         env: { GH_TOKEN: "${{ github.token }}" }
