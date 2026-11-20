@@ -5,9 +5,17 @@ HOPR mixnet to a VPN exit, and pays the relaying nodes per megabyte from a small
 creates for you. Under the hood it runs the official Gnosis VPN client core
 ([gnosis_vpn-client](https://github.com/gnosis/gnosis_vpn-client)), patched to build for Windows.
 
-**Status: test builds.** The installer is not code-signed, there is no kill switch yet (see
-[What it protects](#what-it-protects-and-what-not)), and the app talks to the production network
-with real funds. Use it to try Gnosis VPN on Windows, not as your only protection.
+> [!WARNING]
+> **Prototype, for testing only.** Gnosis VPN for Windows is an experimental prototype, not a
+> finished or supported product, and it has not been security-audited.
+>
+> - **It may expose your traffic.** There is no kill switch: if the tunnel fails, traffic goes out
+>   directly (see [What it protects](#what-it-protects-and-what-not)), and a fault in this
+>   prototype can send traffic outside the tunnel at any time.
+> - **It spends real funds** on Gnosis Chain. Only fund it with amounts you can afford to lose.
+> - **No warranty** (GNU GPL v3.0). The installer is not code-signed.
+>
+> Do not rely on it to protect your identity or your data.
 
 ## Install
 

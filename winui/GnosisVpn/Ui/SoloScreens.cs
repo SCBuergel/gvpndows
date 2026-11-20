@@ -41,6 +41,8 @@ public static class SoloScreens
             c.Children.Add(Btn("Open the funding portal", () => G.Act("fundPortal"), "accent lg", trail: "open_in_new", disabled: AppEngine.FundingUrl(G.Real.NodeAddress) == null));
             var addr = Mono(G.Real.NodeAddress, 12, "text-2"); addr.IsTextSelectionEnabled = true; addr.TextAlignment = TextAlignment.Center;
             c.Children.Add(addr);
+            var proto = Txt(PROTOTYPE, 12, "text-2"); proto.TextAlignment = TextAlignment.Center; proto.MaxWidth = 380;
+            c.Children.Add(proto);
             return Center(c);
         }
         if (key == "sync")

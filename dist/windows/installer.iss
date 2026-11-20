@@ -18,7 +18,7 @@
 AppId={{6F0C2A34-9E5B-4D1C-8B7A-0D9E3C5B2A61}
 AppName=Gnosis VPN
 AppVersion={#AppVersion}
-AppPublisher=Gnosis VPN for Windows (test builds)
+AppPublisher=Gnosis VPN for Windows (prototype, for testing only)
 AppPublisherURL=https://github.com/SCBuergel/gvpndows
 ; Only the uninstaller and its scripts live here; install.ps1 owns this folder's permissions.
 DefaultDirName={commonpf64}\Gnosis VPN Service
@@ -40,6 +40,8 @@ UninstallDisplayIcon={commonpf64}\Gnosis VPN\GnosisVPN.exe
 SetupIconFile=..\..\winui\GnosisVpn\Assets\app.ico
 WizardImageFile=wizard-164.bmp,wizard-328.bmp
 WizardSmallImageFile=wizard-small-55.bmp,wizard-small-110.bmp
+; shown before installing (skipped by /SILENT and /VERYSILENT)
+InfoBeforeFile=DISCLAIMER.txt
 CloseApplications=no
 SetupLogging=yes
 

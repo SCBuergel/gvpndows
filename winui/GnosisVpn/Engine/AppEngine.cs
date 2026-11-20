@@ -97,6 +97,10 @@ public sealed class AppEngine
 
     static readonly HashSet<string> KeepFlash = new() { "details", "row", "dismiss", "dismissMsg", "q", "ptab", "pall", "copy", "view", "icons" };
 
+    /// <summary>The prototype disclaimer the app shows (the installer and README carry the long form,
+    /// dist/windows/DISCLAIMER.txt).</summary>
+    public const string PROTOTYPE = "Prototype for testing only. It may expose your traffic and spends real funds: use small amounts, and do not rely on it to protect you.";
+
     /// <summary>The funding portal, opened for this VPN address (the portal reads ?address=).</summary>
     public const string FUNDING_PORTAL = "https://funding.vpn.gnosis.eth.limo/";
     public static string? FundingUrl(string addr) =>

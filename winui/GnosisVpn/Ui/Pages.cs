@@ -213,6 +213,7 @@ public sealed class Pages
         if (mid.Children.Count > 0) main.Children.Add(mid);
         main.Children.Add(Actions());
         if (Details() is UIElement det) main.Children.Add(det);
+        main.Children.Add(Txt(PROTOTYPE, 12, "text-2"));
         main.MaxWidth = 600;
 
         bool two = w.ContentWidth >= 900;
@@ -475,7 +476,8 @@ public sealed class Pages
         p.Children.Add(Section("About"));
         var ver = System.Reflection.CustomAttributeExtensions.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(typeof(App).Assembly)?.InformationalVersion ?? "?";
         var plus = ver.IndexOf('+'); if (plus > 0) ver = ver[..Math.Min(ver.Length, plus + 8)];
-        p.Children.Add(Grp(Card("vpn_key", "Gnosis VPN", $"App {ver} · test build", null)));
+        p.Children.Add(Grp(Card("vpn_key", "Gnosis VPN", $"App {ver} · prototype", null),
+            Card("warning", "Prototype, for testing only", "Not a finished or supported product, and not security-audited. There is no kill switch, so it may expose your traffic; it spends real funds on Gnosis Chain. Use small amounts, and do not rely on it to protect your identity or your data. No warranty (GNU GPL v3.0).", null)));
         return p;
     }
 }

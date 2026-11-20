@@ -56,4 +56,7 @@ for key, files in (("SetupIconFile", ["../../winui/GnosisVpn/Assets/app.ico"]),
     for f in files: assert os.path.isfile(os.path.join(root, "dist/windows", f)), f + " missing"
 assert "<ApplicationIcon>Assets\\app.ico</ApplicationIcon>" in read("winui/GnosisVpn/GnosisVpn.csproj"), "the .exe has no app icon"
 for st in ("off", "ok", "warn", "bad"): assert os.path.isfile(os.path.join(root, "winui/GnosisVpn/Assets", f"tray-{st}.ico"))
+# the prototype disclaimer: shown by the installer before installing, in the README and the zip
+assert re.search(r"^InfoBeforeFile=DISCLAIMER\.txt$", iss, re.M) and os.path.isfile(os.path.join(root, "dist/windows/DISCLAIMER.txt")), "installer does not show the disclaimer"
+assert "Prototype, for testing only" in read("README.md") and "prototype" in read("dist/windows/README.txt").splitlines()[0], "README or the zip readme lost the disclaimer"
 print("build consistency ok")
