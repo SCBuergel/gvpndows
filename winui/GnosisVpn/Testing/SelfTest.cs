@@ -180,6 +180,28 @@ public static class SelfTest
         Reply("{\"type\":\"destination_ambiguous\",\"candidates\":[\"a\",\"b\"]}");
         Check(g.S.Conn == "idle" && g.S.Flash?.Tone == "bad", "destination_ambiguous is a refusal");
 
+        // ---- R7-10: a state's message goes when the state ends; other messages stay
+        const string LTID = "gvpn-lt-1-ynm1", ROUTE_WAIT = "Waiting for a route to GVPN-LT-1.", PAY_WAIT = "Waiting for the exit to see your payment.";
+        g.S.Flash = null; g.S.Fq = new();
+        rb.AttemptForTest(LTID); g.S.Loc = LTID; g.S.Conn = "connecting";
+        rb.ConnectReplyForTest(LTID, JsonNode.Parse("{\"type\":\"waiting_to_connect\"," + LT + ",\"route_health\":{\"type\":\"not_routable\"}}"));
+        var toLt = State(run); toLt["status"]!["data"]!["target"] = LTID;
+        rb.ApplyForTest(toLt, null);
+        Check(g.S.Flash?.Lead == ROUTE_WAIT, "waiting for a route stays while the core waits for it");
+        g.SetFlash("bad", "Other.", "x");
+        rb.ApplyForTest(State(run, connected), null);
+        Check(g.S.Conn == "connected" && g.S.Flash?.Lead == "Other." && g.S.Fq.All(f => f.Lead != ROUTE_WAIT), "waiting for a route goes once connected, shown or queued");
+        g.S.Flash = null; g.S.Fq = new();
+        rb.ApplyForTest(State(run, waiting), null);
+        g.SetFlash("bad", "Your VPN connection ended.", "x");
+        Check(g.S.Fq.Any(f => f.Lead == PAY_WAIT), "the payment wait message is queued under a newer one");
+        rb.ApplyForTest(State(run), null);
+        Check(g.S.Flash?.Lead == "Your VPN connection ended." && g.S.Fq.All(f => f.Lead != PAY_WAIT), "a queued payment wait message goes with the connection");
+        rb.ApplyForTest(State(run, waiting), null);
+        rb.ApplyForTest(State(run, connected), null);
+        Check(g.S.Flash?.Lead == "Your VPN connection ended.", "retracting the shown payment wait message moves the next one up");
+        g.S.Flash = null; g.S.Fq = new();
+
         // ---- shipped assets
         var dir = Path.Combine(AppContext.BaseDirectory, "Assets");
         foreach (var name in new[] { "app.ico", "appicon-32.png", "appicon-256.png", "tray-off.ico", "tray-ok.ico", "tray-warn.ico", "tray-bad.ico", "logo-light.svg", "logo-dark.svg", "gvis-light.svg", "gvis-dark.svg" })

@@ -87,6 +87,13 @@ public sealed class AppEngine
         S.Flash = new Flash { Tone = tone, Lead = lead, Text = text, Btns = btns ?? new() };
     }
     static Flash Shift(List<Flash> q) { var f = q[0]; q.RemoveAt(0); return f; }
+    /// <summary>Takes back the message with this lead once its state ended, shown or queued; the
+    /// next queued message moves up, as on dismiss. Other messages stay.</summary>
+    public void Retract(string lead)
+    {
+        S.Fq = S.Fq.Where(x => x.Lead != lead).ToList();
+        if (S.Flash?.Lead == lead) S.Flash = S.Fq.Count > 0 ? Shift(S.Fq) : null;
+    }
 
     static readonly HashSet<string> KeepFlash = new() { "details", "row", "dismiss", "dismissMsg", "q", "ptab", "pall", "copy", "view", "icons" };
 

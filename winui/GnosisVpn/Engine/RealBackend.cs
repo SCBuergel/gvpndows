@@ -143,6 +143,11 @@ public sealed class RealBackend
     string? shownDest; long shownSince; string? droppedDest; long droppedSince; double droppedAt; bool dropping;
     const double DROP_MS = 10_000;
     public void AgeDisconnectForTest(double ms) => droppedAt -= ms;
+    /// <summary>For --selftest: a connect to this exit is under way, as after a pick.</summary>
+    public void AttemptForTest(string dest) { attemptDest = dest; attemptSeen = false; attemptAt = AppEngine.Now; pendingConnect = dest; pendingAt = AppEngine.Now; }
+    const string PAYMENT_WAIT = "Waiting for the exit to see your payment.";
+    /// <summary>The "Waiting for a route" message a connect reply showed, and its exit.</summary>
+    string? routeWaitLead, routeWaitDest;
     public string NodeAddress { get; private set; } = "";
     /// <summary>Funds on the node and what the core asks for before it can start (wxHOPR, xDAI), while it waits for funds.</summary>
     public double HaveWx { get; private set; }
@@ -398,6 +403,13 @@ public sealed class RealBackend
             }
         }
 
+        // "Waiting for a route" ends when that exit's connection is under way, or the attempt ended
+        // (Couldn't connect, Disconnect, another exit picked)
+        if (routeWaitLead != null && (attemptDest != routeWaitDest || curId == routeWaitDest && kind is "connecting" or "reconnecting" or "connected"))
+        {
+            g.Retract(routeWaitLead); routeWaitLead = routeWaitDest = null;
+        }
+
         // the session's PIX payment: data left at this exit, and the exit holding traffic until it sees the payment
         var pix = conn?["pix"];
         if (pix != null && curId != null)
@@ -416,10 +428,10 @@ public sealed class RealBackend
         var pixPhase = pix?["phase"]?["type"]?.ToString();
         if (kind == "connected" && !dropped && (waiting || pixPhase == "payment_failed"))
         {
-            if (S.Flash?.Lead != "Waiting for the exit to see your payment.")
-                g.SetFlash("warn", "Waiting for the exit to see your payment.", pixPhase == "payment_failed" ? "The last payment failed; the next one is retried automatically." : "Traffic resumes once it arrives.");
+            if (S.Flash?.Lead != PAYMENT_WAIT)
+                g.SetFlash("warn", PAYMENT_WAIT, pixPhase == "payment_failed" ? "The last payment failed; the next one is retried automatically." : "Traffic resumes once it arrives.");
         }
-        else if (S.Flash?.Lead == "Waiting for the exit to see your payment.") S.Flash = null;
+        else g.Retract(PAYMENT_WAIT);
 
         // balance: what can still pay exits, the Safe's wxHOPR plus the Curvy PIX pool's (null without
         // a pool), shown in MB at the PIX price
@@ -448,7 +460,10 @@ public sealed class RealBackend
             return;
         }
         if (type == "waiting_to_connect")
-            g.SetFlash("info", $"Waiting for a route to {name}.", Health(AsView(resp?["route_health"]), null));
+        {
+            routeWaitLead = $"Waiting for a route to {name}."; routeWaitDest = dest;
+            g.SetFlash("info", routeWaitLead, Health(AsView(resp?["route_health"]), null));
+        }
     }
 
     /// <summary>A connect reply's bare route health state, in the status's view form that Health reads.</summary>
