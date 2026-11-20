@@ -22,7 +22,9 @@ public sealed class ServiceLink
     /// <summary>Debug: the step a request is in (logged by the poll watchdog when a poll stalls).</summary>
     public volatile string Step = "idle";
 
-    /// <param name="retry">resend once on a broken connection: only for requests that can safely repeat</param>
+    /// <param name="retry">resend once on a broken connection: only for requests that can safely repeat.
+    /// Without it a request is still sent again once on a new connection if the write failed on a
+    /// reused one (the service restarted, which IsConnected does not notice): nothing was delivered.</param>
     public async Task<JsonNode?> Send(object cmd, int timeoutMs = 65000, bool retry = true)
     {
         Step = "gate";
@@ -30,12 +32,14 @@ public sealed class ServiceLink
         var t0 = DateTime.UtcNow;
         try
         {
-            for (int attempt = 0; attempt < (retry ? 2 : 1); attempt++)
+            int tries = retry ? 2 : 1;
+            for (int attempt = 0; attempt < tries; attempt++)
             {
+                bool reused = Connected, written = false;
                 try
                 {
                     Step = "check connected";
-                    if (!Connected)
+                    if (!reused)
                     {
                         Step = "connect";
                         pipe?.Dispose();
@@ -50,6 +54,7 @@ public sealed class ServiceLink
                     }
                     Step = "write";
                     await wr!.WriteLineAsync(JsonSerializer.Serialize(cmd));
+                    written = true;
                     Step = "read";
                     var line = await rd!.ReadLineAsync().WaitAsync(TimeSpan.FromMilliseconds(timeoutMs));
                     Step = "parse";
@@ -57,7 +62,11 @@ public sealed class ServiceLink
                     LastError = null;
                     return JsonNode.Parse(line);
                 }
-                catch (Exception e) when (attempt == 0 && retry) { LastError = e.Message; pipe?.Dispose(); pipe = null; }
+                catch (Exception e) when (attempt == 0 && (retry || reused && !written))
+                {
+                    LastError = e.Message; pipe?.Dispose(); pipe = null;
+                    if (!retry) { tries = 2; App.Log($"service: the connection was stale ({e.Message}); sending on a new one"); }
+                }
             }
             return null;
         }
