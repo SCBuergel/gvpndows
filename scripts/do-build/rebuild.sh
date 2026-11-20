@@ -11,7 +11,7 @@ ssh_() { ssh "${SSH_OPTS[@]}" "root@$ip" "$@"; }
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo none)$(git diff --quiet HEAD 2>/dev/null || echo -dirty)
 # Only these source paths go up; never secrets.
 ssh_ 'mkdir -p /root/src && find /root/src -mindepth 1 -maxdepth 1 ! -name target -exec rm -r {} +'
-tar -czf - Cargo.toml build.rs .cargo src rust | ssh_ 'tar -xzf - -C /root/src'
+tar -czf - --exclude='winui/*/bin' --exclude='winui/*/obj' --exclude='rust/pure-tests/target' --exclude='__pycache__' --exclude='scripts/aws/speedtest/bin' --exclude='scripts/aws/speedtest/obj' Cargo.toml build.rs .cargo src rust dist scripts winui | ssh_ 'tar -xzf - -C /root/src'
 scp -q "${SSH_OPTS[@]}" scripts/do-build/build-remote.sh "root@$ip:/root/upload/"
 # Private relay topic for "send key/log to developer" (not in the repo; kept in ~/.config).
 TOPIC=$(cat "$HOME/.config/gvpndows-secrets/ntfy-topic" 2>/dev/null || true)
