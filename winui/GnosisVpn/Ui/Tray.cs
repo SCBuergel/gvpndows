@@ -21,6 +21,8 @@ public static class Tray
 {
     static NotifyIconNative? icon;
     static TrayFlyoutWindow? fly;
+    /// <summary>The flyout's location list is open (the arrow next to the current location).</summary>
+    static bool listOpen;
 
     public static string State(AppEngine g) => g.S.Conn switch { "connected" => "ok", "idle" => "off", _ => "warn" };
     static string StatusTxt(AppEngine g) => g.S.Conn switch { "connecting" => "Connecting", "connected" => "Connected", "reconnecting" => "Reconnecting", _ => "Not connected" };
@@ -77,12 +79,54 @@ public static class Tray
     static void ToggleFlyout(MainWindow w, NotifyIconNative.POINT at)
     {
         if (fly != null) { fly.Close(); fly = null; return; }
+        listOpen = false;
         fly = new TrayFlyoutWindow(w, at);
-        fly.Closed += (_, _) => fly = null;
+        fly.Closed += (_, _) => { fly = null; listOpen = false; };
         fly.Activate();
     }
 
     public static void Dispose() { try { fly?.Close(); icon?.Dispose(); } catch { } icon = null; }
+
+    /// <summary>Exits the flyout's list offers: available ones, best route first.</summary>
+    static System.Collections.Generic.List<Exit> ListExits(AppEngine g) =>
+        g.EX.Where(x => g.GradeOf(x).K != "hidden").OrderByDescending(x => g.GradeOf(x).Sc ?? -2).ToList();
+
+    /// <summary>Everything the flyout shows; it is rebuilt only when this changes. Rebuilding on every
+    /// status poll (each second) replaced the buttons under the pointer, so clicks were lost.</summary>
+    public static string FlyoutSig(MainWindow w)
+    {
+        var G = w.G; var S = G.S; var e = G.Ex(S.Loc);
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"{Theme.Dark}|{S.Conn}|{S.Loc}|{S.Icons}|{Mb(S.Balance)}|{Math.Round(G.Left())}|{listOpen}|{G.GradeOf(e).K}{G.GradeOf(e).N}|{G.Best()?.Id}");
+        if (listOpen) foreach (var x in ListExits(G)) sb.Append('|').Append(x.Id).Append(G.GradeOf(x).K).Append(G.GradeOf(x).N);
+        return sb.ToString();
+    }
+
+    /// <summary>The scrollable list of locations under the current one; picking one connects (or switches) to it.</summary>
+    static UIElement LocationList(MainWindow w)
+    {
+        var G = w.G; var S = G.S; var best = G.Best();
+        var list = new StackPanel { Spacing = 2 };
+        foreach (var x in ListExits(G))
+        {
+            bool cur = x.Id == S.Loc && G.IsOn;
+            var g = new Grid { ColumnSpacing = 10 };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); g.ColumnDefinitions.Add(new ColumnDefinition()); g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            if (ExitIcons.For(x.Id, S.Icons, cc: x.Cc) is FrameworkElement xi) g.Children.Add(xi);
+            var sub = HS(6, Bars(G, x));
+            if (best != null && x.Id == best.Id) sub.Children.Add(Pill("Current Best Location", "auto_awesome"));
+            var t = V(2, Txt(x.Country, 13), sub); t.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(t, 1); g.Children.Add(t);
+            if (cur) { var on = Txt("Connected", 12, "sync-hi"); on.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(on, 2); g.Children.Add(on); }
+            var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Padding = T(8, 6, 8, 6), IsEnabled = !cur,
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0) };
+            var id = x.Id;
+            b.Click += (_, _) => { listOpen = false; G.Act("pick2", id); fly?.Refresh(); };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, (G.IsOn ? "Switch to " : "Connect to ") + x.Country);
+            list.Children.Add(b);
+        }
+        if (list.Children.Count == 0) list.Children.Add(Txt(G.EX.Count == 0 ? "Loading locations…" : "No location has a route right now.", 13, "text-2"));
+        return new ScrollViewer { Content = list, MaxHeight = 260, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+    }
 
     /// <summary>The notification-area flyout's content.</summary>
     public static UIElement FlyoutContent(MainWindow w, Action close)
@@ -99,20 +143,23 @@ public static class Tray
         if (c is "connecting" or "reconnecting") Anim.Pulse(dot, 1, .3, .5);
         var st = new Grid();
         st.Children.Add(HS(10, dot, Txt(StatusTxt(G), 16, bold: true)));
-        if (G.IsOn) { var l = HS(0, w.Live("left", Mono("", 12, "text-2")), Txt(" left here", 12, "text-2")); l.HorizontalAlignment = HorizontalAlignment.Right; l.VerticalAlignment = VerticalAlignment.Center; st.Children.Add(l); }
+        if (G.IsOn) { var l = HS(0, Mono(Math.Round(G.Left()) + " MB", 12, "text-2"), Txt(" left here", 12, "text-2")); l.HorizontalAlignment = HorizontalAlignment.Right; l.VerticalAlignment = VerticalAlignment.Center; st.Children.Add(l); }
         var locRow = new Grid { ColumnSpacing = 12 };
         locRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); locRow.ColumnDefinitions.Add(new ColumnDefinition()); locRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         if (ExitIcons.For(e.Id, S.Icons, cc: e.Cc) is FrameworkElement xi) locRow.Children.Add(xi);
         var lt = V(2, Txt(e.Country, 14), HS(6, Bars(G, e), Txt(g.Label, 12, "text-2"))); Grid.SetColumn(lt, 1); locRow.Children.Add(lt);
-        var chev = Icons.Icon("chevron_right", 16); Grid.SetColumn(chev, 2); chev.VerticalAlignment = VerticalAlignment.Center; locRow.Children.Add(chev);
+        var chev = Icons.Icon(listOpen ? "expand_less" : "expand_more", 16); Grid.SetColumn(chev, 2); chev.VerticalAlignment = VerticalAlignment.Center; locRow.Children.Add(chev);
         var loc = new Button { Content = locRow, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Padding = T(12, 10, 12, 10) };
-        loc.Click += (_, _) => { close(); w.ShowWindow(); A("pick"); };
+        loc.Click += (_, _) => { listOpen = !listOpen; fly?.Refresh(); };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(loc, listOpen ? "Hide locations" : $"Change location, now {e.Country}");
         var foot = new Grid { BorderBrush = Theme.Br("stroke"), BorderThickness = T(0, 1, 0, 0), Padding = T(0, 4, 0, 0) };
         var bal = new TextBlock { FontSize = 12, Foreground = Theme.Br("text-2"), VerticalAlignment = VerticalAlignment.Center };
         bal.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = "Balance " }); bal.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = Mb(S.Balance), FontFamily = Theme.Mono, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = Theme.Br("text") });
         foot.Children.Add(bal);
         var open = Btn("Open Gnosis VPN", () => { close(); w.ShowWindow(); }, "hyper sm"); open.HorizontalAlignment = HorizontalAlignment.Right; foot.Children.Add(open);
-        var p = V(12, head, st, loc, main, foot); p.Padding = new Thickness(16); p.Width = 340;
+        var p = V(12, head, st, loc);
+        if (listOpen) p.Children.Add(LocationList(w));
+        p.Children.Add(main); p.Children.Add(foot); p.Padding = new Thickness(16); p.Width = 340;
         return p;
     }
 
@@ -138,22 +185,34 @@ public sealed class TrayFlyoutWindow : Window
         Refresh();
         AppWindow.SetPresenter(OverlappedPresenter.CreateForContextMenu());
         AppWindow.IsShownInSwitchers = false;
-        var area = DisplayArea.GetFromPoint(new Windows.Graphics.PointInt32(at.X, at.Y), DisplayAreaFallback.Primary).WorkArea;
-        double scale = w.RootElement.XamlRoot?.RasterizationScale ?? 1.0;
+        area = DisplayArea.GetFromPoint(new Windows.Graphics.PointInt32(at.X, at.Y), DisplayAreaFallback.Primary).WorkArea;
+        scale = w.RootElement.XamlRoot?.RasterizationScale ?? 1.0;
         root.Measure(new Windows.Foundation.Size(340, 2000));
-        int ww = (int)(340 * scale), hh = (int)((root.DesiredSize.Height + 48) * scale);
-        int x = at.X > 0 ? Math.Clamp(at.X - ww / 2, area.X + 12, area.X + area.Width - ww - 12) : area.X + area.Width - ww - 12;
+        ww = (int)(340 * scale); int hh = (int)((root.DesiredSize.Height + 48) * scale);
+        x = at.X > 0 ? Math.Clamp(at.X - ww / 2, area.X + 12, area.X + area.Width - ww - 12) : area.X + area.Width - ww - 12;
         AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(x, area.Y + area.Height - hh - 12, ww, hh));
         Activated += (_, e) => { if (e.WindowActivationState == WindowActivationState.Deactivated) Close(); };
-        // fit the height once the content is laid out (live values and fonts change its size)
-        root.Loaded += (_, _) =>
-        {
-            root.Measure(new Windows.Foundation.Size(340, 2000));
-            var h2 = (int)((root.DesiredSize.Height + 2) * scale); var p0 = AppWindow.Position;
-            AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(p0.X, area.Y + area.Height - h2 - 12, ww, h2));
-        };
+        // fit the height once the content is laid out (fonts change its size), and after each rebuild
+        root.Loaded += (_, _) => Fit();
     }
-    public void Refresh() { root.Children.Clear(); root.Children.Add(Tray.FlyoutContent(w, Close)); }
+    readonly Windows.Graphics.RectInt32 area; readonly double scale; readonly int ww, x;
+    string? sig;
+    /// <summary>Rebuilds the content when what it shows changed (the list opening, the state, the exits).</summary>
+    public void Refresh()
+    {
+        var s = Tray.FlyoutSig(w);
+        if (s == sig) return;
+        sig = s;
+        root.Children.Clear(); root.Children.Add(Tray.FlyoutContent(w, Close));
+        if (root.IsLoaded) DispatcherQueue.TryEnqueue(Fit);
+    }
+    /// <summary>Height to the content, bottom edge above the notification area.</summary>
+    void Fit()
+    {
+        root.Measure(new Windows.Foundation.Size(340, 2000));
+        var h = (int)Math.Min(area.Height - 24, (root.DesiredSize.Height + 2) * scale);
+        AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(x, area.Y + area.Height - h - 12, ww, h));
+    }
 }
 
 /// <summary>Toasts (Windows App SDK app notifications) for the app's notifications (connection changes, low data); missed
