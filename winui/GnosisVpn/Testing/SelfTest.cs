@@ -119,9 +119,11 @@ public static class SelfTest
 
         // ---- R7-8: after Disconnect the service's cached status (same connection) does not bring it back
         var run = "{\"type\":\"running\"}";
-        rb.Handle("disconnect", null); var recentN = g.S.Recent.Count;
+        rb.Handle("disconnect", null); var recent0 = g.S.Recent;
         rb.ApplyForTest(State(run, connected), null);
-        Check(g.S.Conn == "idle" && g.S.Recent.Count == recentN, "a stale status after Disconnect stays idle");
+        Check(g.S.Conn == "idle" && ReferenceEquals(g.S.Recent, recent0), "a stale status after Disconnect stays idle, Recent untouched");
+        rb.ApplyForTest(State(run, waiting), null);
+        Check(g.S.Flash?.Lead != "Waiting for the exit to see your payment.", "no payment wait message from a stale status");
         rb.ApplyForTest(State(run), null); rb.ApplyForTest(State(run, connected), null);
         Check(g.S.Conn == "connected", "after a disconnected status the connection shows again");
         rb.Handle("disconnect", null); rb.AgeDisconnectForTest(11_000);

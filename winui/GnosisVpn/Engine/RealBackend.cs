@@ -405,7 +405,7 @@ public sealed class RealBackend
         else if (live != null) S.Alloc.Remove(live);
         var waiting = conn?["stall"]?["awaiting_payment_since"] != null;
         var pixPhase = pix?["phase"]?["type"]?.ToString();
-        if (kind == "connected" && (waiting || pixPhase == "payment_failed"))
+        if (kind == "connected" && !dropped && (waiting || pixPhase == "payment_failed"))
         {
             if (S.Flash?.Lead != "Waiting for the exit to see your payment.")
                 g.SetFlash("warn", "Waiting for the exit to see your payment.", pixPhase == "payment_failed" ? "The last payment failed; the next one is retried automatically." : "Traffic resumes once it arrives.");
