@@ -35,6 +35,15 @@ foreach ($k in $runKeys) {
 }
 Done "$removed removed; users who are not signed in keep theirs (it then starts nothing)"
 
+# Installed by GnosisVPN-Setup.exe: its uninstaller lives in the service folder removed below, so
+# after Uninstall.cmd its "Gnosis VPN" entry in Apps would point at nothing. (AppId in installer.iss)
+$innoKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{6F0C2A34-9E5B-4D1C-8B7A-0D9E3C5B2A61}_is1"
+if (Test-Path $innoKey) {
+  Step "Removing the installer's entry in Apps"
+  Remove-Item $innoKey -Recurse -Force -ErrorAction SilentlyContinue
+  Done
+}
+
 Step "Removing the service files ($SvcDir)"
 if (Test-Path -LiteralPath $SvcDir) { cmd.exe /c rmdir /s /q "$SvcDir" 2>$null }
 Done $(if (Test-Path -LiteralPath $SvcDir) { "some files are still in use; they go after a restart" } else { "" })

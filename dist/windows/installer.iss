@@ -79,8 +79,10 @@ begin
     Script := ExpandConstant('{tmp}\GnosisVPN\install.ps1');
     ForceDirectories(ExtractFileDir(Log));
     WizardForm.StatusLabel.Caption := 'Installing the Gnosis VPN service and app...';
-    Cmd := '-NoProfile -ExecutionPolicy Bypass -Command "try { & ''' + Script + ''' -NoLaunch *>&1 | Out-File -Encoding utf8 ''' + Log + '''; exit 0 } catch { $_ | Out-File -Append -Encoding utf8 ''' + Log + '''; exit 1 }"';
-    if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Cmd,
+    // -File, not -Command: a path inside a command string breaks on a user name with an apostrophe.
+    // An error in install.ps1 ends powershell with exit code 1; cmd.exe passes it on.
+    Cmd := '/c ""' + ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe') + '" -NoProfile -ExecutionPolicy Bypass -File "' + Script + '" -NoLaunch > "' + Log + '" 2>&1"';
+    if not Exec(ExpandConstant('{cmd}'), Cmd,
         ExpandConstant('{tmp}\GnosisVPN'), SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
     begin
       InstallFailed := True;

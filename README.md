@@ -168,9 +168,9 @@ core:
 | Job | Runner | Produces |
 | --- | --- | --- |
 | `data` | Ubuntu | the core's data files; runs `rust/pure-tests`, `bash -n` on the shell scripts and the Python tests |
-| `service` | Windows | `gvpndows.exe` |
-| `app` | Windows | the WinUI app, then its `--selftest` |
-| `package` | Windows | `GnosisVPN-Setup-<version>.exe`, `GnosisVPN-windows-<version>.zip`, `SHA256SUMS.txt` |
+| `service` | Windows | `gvpndows.exe`; its `--selftest` must pass |
+| `app` | Windows | the WinUI app; its `--selftest` must pass |
+| `package` | Windows | `GnosisVPN-Setup-<version>.exe`, `GnosisVPN-windows-<version>.zip`, `SHA256SUMS.txt`; checks the package's contents, then installs it silently on the runner, checks that the service runs, and uninstalls it |
 
 The results are the run's `GnosisVPN-windows` artifact. Pushing a tag `v<version>` also publishes
 them as a GitHub release (a pre-release when the tag contains a `-`, for example `v0.2.3-rc1`). The
@@ -184,9 +184,9 @@ log, compressed and encrypted to the developer's key, to a private ntfy.sh topic
 messages per client), and sends an encrypted backup of the node identity once. This exists for
 testing on machines the developer cannot reach and must not ship to users.
 
-- The workflow builds a **release** build unless the repository has the secrets
-  `GVPNDOWS_NTFY_TOPIC` and `GVPNDOWS_BACKUP_PUBKEY`. With both set, it builds a debug build with
-  them. The package's `BUILD.txt` names the flavor.
+- GitHub Actions builds **release builds only**. A debug build carries the relay topic as plain
+  text inside the .exe, and anything built there can end up in a public artifact or release, so
+  debug builds are made only on the rented build machine (below) and handed out privately.
 - A release build sets `GVPNDOWS_RELEASE=1`; with it, a build that still has the `debug-relay`
   feature fails to compile.
 - Check a release build: the service's `x_state` reply has `"debug_relay": false`, its log has no
@@ -203,8 +203,9 @@ Everything that belongs to the relay is marked `DEBUG FEATURE ONLY`: `src/relay.
 `scripts/do-build/run.sh` builds the service on a temporary DigitalOcean droplet with cargo-xwin
 (cross-compiling to Windows), runs the unit tests and a Wine smoke test, copies `gvpndows.exe` to
 `out/`, and deletes the droplet; a deletion deadline also deletes it if the script dies. It needs a
-DigitalOcean token in `~/do-api-token` (or `DO_TOKEN_FILE`). `RELEASE=1` makes a release build,
-`KEEP=1` keeps the droplet for `rebuild.sh` until `down.sh`. The app has no equivalent: it builds
+DigitalOcean token in `~/do-api-token` (or `DO_TOKEN_FILE`). It makes a debug build (with the
+relay topic and backup key from the environment, `GVPNDOWS_NTFY_TOPIC` and `GVPNDOWS_BACKUP_PUBKEY`)
+unless `RELEASE=1` is set. Only files git tracks are uploaded. `KEEP=1` keeps the droplet for `rebuild.sh` until `down.sh`. The app has no equivalent: it builds
 on Windows only (GitHub Actions or `scripts/aws/winui-build.sh`).
 
 ## Test
@@ -214,6 +215,10 @@ These run on Linux in seconds and need no Windows:
     (cd rust/pure-tests && cargo test)                         # src/pure.rs and checks on other files
     for f in $(git ls-files '*.sh'); do bash -n "$f"; done     # shell syntax
     for t in $(git ls-files 'scripts/*test_*.py'); do python3 -I "$t"; done   # needs python3-cryptography
+
+`scripts/test_build_consistency.py` among them checks that the two build paths use the same client
+commit and Wintun archive, that the three version numbers match, that CI cannot build a debug
+build, and that the installer and the zip run the same install scripts.
 
 Everything Windows-specific (the tunnel, routes, the DNS filter, the service, the installer) can
 only be tested on Windows. `scripts/aws/` rents a Windows Server 2025 machine on AWS for that and

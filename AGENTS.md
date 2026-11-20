@@ -19,7 +19,9 @@ how the pieces fit (app, pipe, service, core); this file adds what you need to c
 - **The debug relay must stay removable.** Anything that sends data to the developer belongs to the
   `debug-relay` feature, is marked `DEBUG FEATURE ONLY`, and has a no-op twin for release builds
   (`src/relay_off.rs`, `src/gnosis/backup_off.rs`). `GVPNDOWS_RELEASE=1` must keep failing to
-  compile a build that has the feature (`src/relay.rs`).
+  compile a build that has the feature (`src/relay.rs`). GitHub Actions never builds a debug
+  build and never reads repository secrets: its artifacts and releases are public, and a debug
+  .exe contains the relay topic as plain text.
 
 ## Tests to run before every commit
 
@@ -57,7 +59,7 @@ routes, DNS, the pipe or installation.
 | Core lifecycle (start, restart, backoff) | `src/gnosis/mod.rs`, `core_restart` in `src/pure.rs` | Each core run has its own tokio runtime, shut down fully before a restart, so two HOPR nodes never run on one identity |
 | What the app shows | `winui/GnosisVpn/Engine/RealBackend.cs` | Maps the core's status JSON to UI state |
 | Install, update, uninstall | `dist/windows/*.ps1`, `dist/windows/installer.iss` | The installer only runs `install.ps1`; keep both paths identical |
-| Build steps | `.github/workflows/windows-installer.yml`, `scripts/do-build/build-remote.sh` | Keep `CLIENT_REF`, the Wintun hash and the patch steps the same in both |
+| Build steps | `.github/workflows/windows-installer.yml`, `scripts/do-build/build-remote.sh` | Keep `CLIENT_REF`, the Wintun archive and the patch steps the same in both (`scripts/test_build_consistency.py` checks the first two) |
 
 ## Pitfalls that cost time before
 
@@ -93,7 +95,7 @@ routes, DNS, the pipe or installation.
 ## Releases
 
 Bump `<Version>` in `winui/GnosisVpn/GnosisVpn.csproj`, `version` in `Cargo.toml` and the
-`gvpndows` entry in `rust/Cargo.lock` together, then push a tag `v<version>`. The workflow
+`gvpndows` entry in `rust/Cargo.lock` together (the consistency test checks it), then push a tag `v<version>`. The workflow
 publishes the installer, the zip and `SHA256SUMS.txt` as a GitHub release.
 
 ## Commits
