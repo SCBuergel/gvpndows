@@ -5,6 +5,8 @@
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <RootNamespace>GnosisVpn</RootNamespace>
     <AssemblyName>GnosisVPN</AssemblyName>
+    <!-- the .exe carries the app icon: Explorer, the taskbar and the Apps list show it -->
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <Version>0.2.2</Version>
     <Platforms>x64</Platforms>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>

@@ -10,6 +10,8 @@ public sealed class Exit
     public string City = "";
     public string Place = "";
     public required string Country;
+    /// <summary>ISO 3166 country code from the exit's geo data ("DE"), or "".</summary>
+    public string Cc = "";
     /// <summary>Round trip to the exit in ms (the probe's status round trip, or the tunnel ping); 0 = unknown.</summary>
     public int Ping;
     /// <summary>The exit's reported load (its own health summary), or "".</summary>
@@ -53,8 +55,11 @@ public sealed class State
     public Dictionary<string, double> Alloc = new();
     /// <summary>The node's Safe balance in MB at the PIX price per byte.</summary>
     public double Balance;
-    public string Icons = "node";
+    public string Icons = "country";       // country | node | flag | none
     public double T, ConnSec;
+    /// <summary>Seconds until this session's paid data runs out at the current rate (the core's
+    /// pix.empty_in), or null while the core cannot tell.</summary>
+    public double? EmptyIn;
     /// <summary>When the current connect attempt started (connecting animation), and its expected length.</summary>
     public double CStart, CDur = 30000;
     public List<string> Stack = new();

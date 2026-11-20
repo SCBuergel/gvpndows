@@ -28,16 +28,21 @@ public static class ConnectAnim
 
     // created once: Win2D objects hold native memory, so nothing is allocated per frame that is not disposed
     static readonly CanvasStrokeStyle Round = new() { StartCap = CanvasCapStyle.Round, EndCap = CanvasCapStyle.Round, LineJoin = CanvasLineJoin.Round };
-    static readonly CanvasTextFormat FB = new() { FontSize = 7, FontWeight = FontWeights.SemiBold, HorizontalAlignment = CanvasHorizontalAlignment.Right };
-    static readonly CanvasTextFormat FN = new() { FontSize = 7, FontWeight = FontWeights.Medium };
-    static readonly CanvasTextFormat FNB = new() { FontSize = 7, FontWeight = FontWeights.SemiBold };
-    static readonly CanvasTextFormat FC = new() { FontSize = 7, FontWeight = FontWeights.Medium, HorizontalAlignment = CanvasHorizontalAlignment.Center };
+    // Labels are drawn without the scale transform, at whole pixels and a font size already scaled
+    // (TextScale), so their glyphs land on the same pixels in every frame.
+    const float TEXT = 7;
+    static readonly CanvasTextFormat FB = new() { FontWeight = FontWeights.SemiBold, HorizontalAlignment = CanvasHorizontalAlignment.Right, WordWrapping = CanvasWordWrapping.NoWrap };
+    static readonly CanvasTextFormat FN = new() { FontWeight = FontWeights.Medium, WordWrapping = CanvasWordWrapping.NoWrap };
+    static readonly CanvasTextFormat FNB = new() { FontWeight = FontWeights.SemiBold, WordWrapping = CanvasWordWrapping.NoWrap };
+    static readonly CanvasTextFormat FC = new() { FontWeight = FontWeights.Medium, HorizontalAlignment = CanvasHorizontalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap };
 
     static double EaseIO(double p) => p < .5 ? 4 * p * p * p : 1 - Math.Pow(-2 * p + 2, 3) / 2;
 
     public static FrameworkElement Build(MainWindow w)
     {
-        var c = new CanvasControl { Height = 150, HorizontalAlignment = HorizontalAlignment.Stretch, ClearColor = Microsoft.UI.Colors.Transparent };
+        // A fixed size, so the drawing's scale never follows the page's width (a scroll bar coming and
+        // going, a rebuild measuring the page differently) and nothing moves between frames.
+        var c = new CanvasControl { Width = 300, Height = 150, HorizontalAlignment = HorizontalAlignment.Center, ClearColor = Microsoft.UI.Colors.Transparent };
         c.Draw += (s, e) => Draw(w, s, e.DrawingSession);
         if (!Anim.Off)
         {
@@ -66,9 +71,10 @@ public static class ConnectAnim
         var S = w.G.S; var e = w.G.Ex(S.Loc);
         double T = Anim.Off ? 3 : AppEngine.Now / 1000, D = (S.CDur > 0 ? S.CDur : 12000) / 1000;
         double el = Anim.Off ? D * 0.85 : (AppEngine.Now - S.CStart) / 1000;
-        float scale = (float)Math.Min(c.ActualWidth / 220, c.ActualHeight / 92);
-        float ox = (float)(c.ActualWidth - 220 * scale) / 2;
-        ds.Transform = Matrix3x2.CreateTranslation(-40, 0) * Matrix3x2.CreateScale(scale) * Matrix3x2.CreateTranslation(ox, 0);
+        float scale = (float)Math.Min(c.Width / 220, c.Height / 92);   // the fixed size, not ActualWidth
+        float ox = (float)Math.Round((c.Width - 220 * scale) / 2);
+        var view = Matrix3x2.CreateTranslation(-40, 0) * Matrix3x2.CreateScale(scale) * Matrix3x2.CreateTranslation(ox, 0);
+        ds.Transform = view;
         Color Cl(string k, double op = 1) { var col = Theme.C(k); return Color.FromArgb((byte)(col.A * Math.Clamp(op, 0, 1)), col.R, col.G, col.B); }
         double Tl(double f, double d, double from, double to) { var t0 = f * D; if (el < t0) return from; var p = d > 0 ? EaseIO(Math.Min(1, (el - t0) / d)) : 1; return from + (to - from) * p; }
         double Loop(double dur, double ph = 0) => ((T + ph) % dur) / dur;
@@ -140,9 +146,19 @@ public static class ConnectAnim
             var op = Tl(f, .6, 0, 1); ds.DrawCircle(pt, 6.5f, Cl("sync", op), 1.3f); ds.FillCircle(pt, 3.2f, Cl("sync-hi", op));
         }
         Ring(YOU, 0); Ring(EXT, EXIT_AT);
-        ds.DrawText("You", YOU.X - 12, YOU.Y - 5, Cl("text"), FB);
-        var hop = GN[ci]; ds.DrawText("1 hop", hop.X, hop.Y + 5, Cl("text-2", Tl(.3, .6, 0, 1)), FC);
-        ds.DrawText(e.Country, EXT.X + 13, EXT.Y - 5, Cl("text"), FNB);
-        ds.DrawText("Exit", EXT.X + 13, EXT.Y + 6, Cl("text-2"), FN);
+        // labels: at whole device pixels, without the transform, in grayscale (steady in every frame)
+        ds.Transform = Matrix3x2.Identity;
+        ds.TextAntialiasing = CanvasTextAntialiasing.Grayscale;
+        float fs = (float)Math.Round(TEXT * scale * 2) / 2;
+        void Label(string s, float x, float y, Color col, CanvasTextFormat f)
+        {
+            var p = Vector2.Transform(new Vector2(x, y), view);
+            f.FontSize = fs;
+            ds.DrawText(s, (float)Math.Round(p.X), (float)Math.Round(p.Y), col, f);
+        }
+        Label("You", YOU.X - 12, YOU.Y - 5, Cl("text"), FB);
+        var hop = GN[ci]; Label("1 hop", hop.X, hop.Y + 5, Cl("text-2", Tl(.3, .6, 0, 1)), FC);
+        Label(e.Country, EXT.X + 13, EXT.Y - 5, Cl("text"), FNB);
+        Label("Exit", EXT.X + 13, EXT.Y + 6, Cl("text-2"), FN);
     }
 }

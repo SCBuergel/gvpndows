@@ -17,7 +17,7 @@ namespace GnosisVpn.Testing;
 ///   --snap DIR                    a screenshot every 10 s plus a line of state in DIR/snap.log
 ///   --click-connect QUERY         clicks Connect on the first exit whose name contains QUERY
 ///   --click-disconnect-after N    ... and Disconnect N seconds after it is connected
-///   --act NAME                    runs the UI action NAME once the service has answered (e.g. gateDirect)
+///   --act NAME                    runs the UI action NAME once the service has answered (e.g. fundPortal)
 /// Screenshots come from the XAML tree (RenderTargetBitmap plus open popups), not from the screen.
 /// </summary>
 public static class Shots

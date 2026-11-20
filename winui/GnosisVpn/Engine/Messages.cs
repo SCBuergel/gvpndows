@@ -40,13 +40,13 @@ public static class Messages
         var S = g.S;
         if (S.Fail != null) return "E1";
         if (S.SyncT != null) return "I0";
-        if (S.Gate) return g.Page == "direct" ? "I-1d" : "I-1";
+        if (S.Gate) return "I-1";
         return S.Conn switch
         {
             "connecting" => "S00b",
             "reconnecting" => "L1",
             "connected" => "S01",
-            _ => g.Page switch { "pick" => "S03s", "settings" => "S19n", "add" => "S18", "direct" => "I-1d", _ => S.Mode == "manual" ? "F1" : "F2" },
+            _ => g.Page switch { "pick" => "S03s", "settings" => "S19n", "add" => "S18", _ => S.Mode == "manual" ? "F1" : "F2" },
         };
     }
 }

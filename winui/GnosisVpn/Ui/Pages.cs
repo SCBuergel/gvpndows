@@ -14,7 +14,7 @@ using static GnosisVpn.Ui.Kit;
 
 namespace GnosisVpn.Ui;
 
-/// <summary>The pages in the NavigationView: Home, Locations, Balance, Send funds directly, Settings.
+/// <summary>The pages in the NavigationView: Home, Locations, Balance, Settings.
 /// Everything they show about the VPN comes from the Gnosis VPN service.</summary>
 public sealed class Pages
 {
@@ -40,7 +40,7 @@ public sealed class Pages
         foreach (var r in S.Recent) A(r.Id);
         foreach (var m in Messages.Moments(G)) A(m.Lead + m.Text + m.Btns?.Count + m.Own);
         if (route == "home" && S.Conn == "connecting") A((int)Math.Min(3, Math.Floor((Now - S.CStart) / Math.Max(1, S.CDur) * 4)));
-        if (route == "direct" || route == "balance") A(Now - S.CopiedAt < 2200);
+        if (route == "balance") A(Now - S.CopiedAt < 2200);
         return sb.ToString();
     }
 
@@ -49,7 +49,6 @@ public sealed class Pages
         "home" => Home(),
         "locations" => Locations(),
         "balance" => Balance(),
-        "direct" => Direct(),
         "settings" => Settings(),
         _ => Home(),
     };
@@ -71,11 +70,22 @@ public sealed class Pages
         return S.Conn switch
         {
             "connecting" => $"Setting up a route to {e.City}.",
-            "connected" => $"Through {e.City} · rotating relays · ",
             "reconnecting" => "Finding a new route…",
-            _ => "Your traffic goes direct, outside Gnosis VPN.",
+            _ => "",
         };
     }
+
+    /// <summary>The connected line: when the exit's paid data runs out, how much is left, and that the
+    /// next chunk is bought by itself (the core always renews; there is no setting to stop it).</summary>
+    public static string Expiry(AppEngine g)
+    {
+        var parts = new List<string>();
+        if (g.S.EmptyIn is double s && s > 0) parts.Add("Expires in " + Dur(s));
+        if (g.Left() > 0) parts.Add(Mb(g.Left()) + " left");
+        parts.Add("Auto-renew on");
+        return string.Join(" · ", parts);
+    }
+    static string Dur(double s) => s >= 3600 ? $"{Math.Floor(s / 3600)} h {Math.Floor(s % 3600 / 60)} min" : s >= 60 ? $"{Math.Ceiling(s / 60)} min" : "under a minute";
 
     FrameworkElement StatusHeader()
     {
@@ -90,10 +100,13 @@ public sealed class Pages
         var ic = Icons.Icon(icon, 28, Theme.Br(fg), true);
         if (c is "connecting" or "reconnecting") Anim.Spin(ic);
         var circle = new Border { Width = 56, Height = 56, CornerRadius = new CornerRadius(28), Background = bg, Child = ic };
-        var sub = new TextBlock { FontSize = 14, Foreground = Theme.Br("text-2"), TextWrapping = TextWrapping.WrapWholeWords };
-        sub.Inlines.Add(new Run { Text = StatusSub() });
-        if (c == "connected") sub.Inlines.Add(w.Live("timer", new Run { FontFamily = Theme.Mono }));
-        var txt = V(2, Title(StatusTxt()), sub);
+        var txt = V(2, Title(StatusTxt()));
+        if (c == "connected" || StatusSub() != "")
+        {
+            var sub = new TextBlock { FontSize = 14, Foreground = Theme.Br("text-2"), TextWrapping = TextWrapping.WrapWholeWords };
+            sub.Inlines.Add(c == "connected" ? w.Live("expiry", new Run { Text = Expiry(G) }) : new Run { Text = StatusSub() });
+            txt.Children.Add(sub);
+        }
         txt.VerticalAlignment = VerticalAlignment.Center;
         var row = HS(16, circle, txt);
         row.Padding = T(0, 4, 0, 8);
@@ -114,7 +127,7 @@ public sealed class Pages
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        if (ExitIcons.For(e.Id, S.Icons, true) is FrameworkElement xi) grid.Children.Add(xi);
+        if (ExitIcons.For(e.Id, S.Icons, true, e.Cc) is FrameworkElement xi) grid.Children.Add(xi);
         col.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(col, 1); grid.Children.Add(col);
         var chg = HS(8, Txt("Change", 14, "text-2"), Icons.Icon("chevron_right", 16, Theme.Br("text-2"))); chg.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(chg, 2); grid.Children.Add(chg);
         var card = new Button
@@ -253,12 +266,11 @@ public sealed class Pages
     (List<Exit> list, bool more, Exit? b, string q) ExitList(bool shortList)
     {
         var q = S.Q.Trim().ToLowerInvariant(); var b = G.Best();
-        var all = G.EX.Where(x => G.GradeOf(x).K != "hidden" && (q != "" || x.Id != S.Loc || S.Ptab == "recent")).ToList();
+        var all = G.EX.Where(x => G.GradeOf(x).K != "hidden" && (q != "" || x.Id != S.Loc || S.Ptab is "recent" or "best")).ToList();
         List<Exit> list = q != "" ? all.Where(x => x.City.ToLowerInvariant().Contains(q) || x.Country.ToLowerInvariant().Contains(q) || x.Place.ToLowerInvariant().Contains(q)).ToList()
             : S.Ptab == "recent" ? S.Recent.Select(r => G.ExOrNull(r.Id)).Where(x => x != null && all.Contains(x)).Cast<Exit>().ToList()
             : S.Ptab == "alpha" ? all.OrderBy(x => x.Country, StringComparer.Create(System.Globalization.CultureInfo.GetCultureInfo("en"), false)).ToList()
             : all.OrderByDescending(x => G.GradeOf(x).Sc ?? -2).ToList();
-        if (S.Simple) list = list.Where(x => !(q == "" && S.Ptab == "best" && b != null && x.Id == b.Id)).ToList();
         var more = q == "" && !S.Pall && list.Count > (shortList ? 6 : 99);
         if (more) list = list.Take(6).ToList();
         return (list, more, b, q);
@@ -301,30 +313,20 @@ public sealed class Pages
         return t;
     }
 
-    FrameworkElement AutoRow(Exit? b)
-    {
-        bool on = G.IsOn;
-        var title = Txt(S.Simple ? (b != null ? b.Country : "Best available") : "Auto · best available", 14, wrap: false);
-        var sub = new WrapPanelLike(6);
-        sub.Add(Pill("Current Best Location", "auto_awesome"));
-        if (b != null) { sub.Add(Bars(G, b)); sub.Add(Txt(S.Simple ? G.GradeOf(b).Label : "Best route right now · " + b.Country, 12, "text-2", wrap: false)); }
-        UIElement act = S.Mode == "auto" && b != null && b.Id == S.Loc && (on || S.Conn == "idle")
-            ? Pill(on ? "On" : "Selected", "check", "ok")
-            : Btn(on ? "Switch" : "Connect", () => Act("auto"), "sm accent", disabled: b == null);
-        return Row(ExitIcons.For("auto", S.Icons), title, sub.Panel, act, auto: true);
-    }
+    /// <summary>The best exit right now carries this label in the list (no separate "best available" row).</summary>
+    static FrameworkElement BestPill() => Pill("Current Best Location", "auto_awesome");
 
     UIElement RowsList(bool shortList)
     {
         var (list, more, b, q) = ExitList(shortList);
         var lv = V(2);
-        if (q == "" && S.Ptab == "best") lv.Children.Add(AutoRow(b));
         foreach (var x in list)
         {
             var sub = new WrapPanelLike(6);
+            if (b != null && x.Id == b.Id) sub.Add(BestPill());
             sub.Add(Bars(G, x));
             sub.Add(QLine(G, x));
-            lv.Children.Add(Row(ExitIcons.For(x.Id, S.Icons), ExitName(x), sub.Panel, RowAction(x)));
+            lv.Children.Add(Row(ExitIcons.For(x.Id, S.Icons, cc: x.Cc), ExitName(x), sub.Panel, RowAction(x)));
         }
         if (list.Count == 0)
         {
@@ -346,7 +348,6 @@ public sealed class Pages
     {
         var (list, _, b, q) = ExitList(false);
         var outer = V(8);
-        if (q == "" && S.Ptab == "best") outer.Children.Add(AutoRow(b));
         var cols = new[] { new GridLength(2, GridUnitType.Star), new GridLength(1.2, GridUnitType.Star), new GridLength(72), new GridLength(64), new GridLength(96), new GridLength(92) };
         Grid TR(bool head)
         {
@@ -373,7 +374,8 @@ public sealed class Pages
         {
             var r = TR(false); var a = G.Left(x.Id);
             var name = new WrapPanelLike(6); name.Add(new TextBlock { Text = x.Country, FontWeight = FontWeights.SemiBold, FontSize = 13 }); name.Add(Mono("#" + Xid(x.Id), 11, "text-2"));
-            var ex = HS(10); if (ExitIcons.For(x.Id, S.Icons) is FrameworkElement xi) ex.Children.Add(xi); ex.Children.Add(name.Panel);
+            if (b != null && x.Id == b.Id) name.Add(BestPill());
+            var ex = HS(10); if (ExitIcons.For(x.Id, S.Icons, cc: x.Cc) is FrameworkElement xi) ex.Children.Add(xi); ex.Children.Add(name.Panel);
             Put(r, 0, ex);
             var ql = HS(6); ql.Children.Add(Bars(G, x)); var qt = QLine(G, x); qt.FontSize = 13; ql.Children.Add(qt);
             Put(r, 1, ql);
@@ -402,16 +404,14 @@ public sealed class Pages
         return Page(Title("Locations"), cmd, rowsHost, foot);
     }
 
-    // =============================== BALANCE, SEND DIRECTLY ===============================
+    // =============================== BALANCE ===============================
+    /// <summary>The address as plain monospace text with a Copy button.</summary>
     UIElement Addr()
     {
         bool copied = Now - S.CopiedAt < 2200;
         var addr = R.NodeAddress;
         if (addr.Length < 12) return Txt("Your VPN address appears once the Gnosis VPN service has started.", 13, "text-2");
-        var v = new TextBlock { FontFamily = Theme.Mono, FontSize = 13, Foreground = Theme.Br("text-2"), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
-        v.Inlines.Add(new Run { Text = addr[..6], FontWeight = FontWeights.SemiBold, Foreground = TextBrush });
-        v.Inlines.Add(new Run { Text = addr[6..^4] });
-        v.Inlines.Add(new Run { Text = addr[^4..], FontWeight = FontWeights.SemiBold, Foreground = TextBrush });
+        var v = Mono(addr, 13); v.TextWrapping = TextWrapping.Wrap; v.VerticalAlignment = VerticalAlignment.Center; v.IsTextSelectionEnabled = true;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(v, "Address " + addr);
         var b = Btn(copied ? "Copied" : "Copy", () =>
         {
@@ -427,53 +427,18 @@ public sealed class Pages
     UIElement Balance()
     {
         var e = G.Ex(S.Loc); var a = G.Left();
-        var bal = Box(V(8, Cap("Available balance"), Mono(Mb(S.Balance), 40, bold: true), Txt("Data your Safe and PIX pool can still pay for, at the current exit's price.", 14, "text-2")));
+        var bal = Box(V(8, Cap("Available balance"), Mono(Mb(S.Balance), 40, bold: true)));
         var p = Page(Title("Balance"), bal);
         p.Children.Add(Section("Add data"));
-        p.Children.Add(Grp(
-            Card("qr_code_2", "Send funds directly", "Your VPN address as a QR code, to send wxHOPR on Gnosis Chain", null, () => Act("gateDirect")),
-            Card("key", "Your VPN address", "Send wxHOPR on Gnosis Chain to it", Addr())));
+        var addr = R.NodeAddress;
+        var col = V(10);
+        if (addr.Length >= 12)
+            col.Children.Add(new Border { Width = 196, Padding = new Thickness(10), CornerRadius = new CornerRadius(6), Background = new SolidColorBrush(Microsoft.UI.Colors.White), Child = QrCode.For(addr, 176), HorizontalAlignment = HorizontalAlignment.Left });
+        col.Children.Add(Addr());
+        col.Children.Add(Btn("Open the funding portal", () => Act("fundPortal"), "accent", trail: "open_in_new", disabled: addr.Length < 12));
+        p.Children.Add(Box(col));
         if (G.IsOn && a > 0) { p.Children.Add(Section("This exit")); p.Children.Add(Box(Usage(e.City))); }
         return p;
-    }
-
-    UIElement Direct()
-    {
-        UIElement head = S.Gate ? Title("Send funds directly") : HS(6, Btn("Balance", () => Act("back"), "subtle"), Icons.Icon("chevron_right", 16, Theme.Br("text-2")), Title("Send funds directly"));
-        if (!S.Gate) { var hb = (StackPanel)head; ((ButtonBase)hb.Children[0]).Content = new TextBlock { Text = "Balance", FontSize = 28, FontWeight = FontWeights.SemiBold, FontFamily = Theme.Display, Foreground = Theme.Br("text-2") }; hb.VerticalAlignment = VerticalAlignment.Center; }
-        var addr = R.NodeAddress;
-        UIElement qrEl = addr.Length >= 12 ? QrCode.For(addr, 176) : Txt("…", 14, "text-2");
-        var qr = new Border { Width = 196, Padding = new Thickness(10), CornerRadius = new CornerRadius(6), Background = new SolidColorBrush(Microsoft.UI.Colors.White), Child = qrEl };
-        var qrCol = V(8, qr, Cap("Your VPN address"), Addr()); qrCol.HorizontalAlignment = HorizontalAlignment.Center;
-        foreach (var ch in qrCol.Children) ch.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
-        var left = Box(qrCol);
-        var right = V(12, Info(new Moment("info", "", "", "", null), _ => { }, null), Sub("What to send"));
-        if (S.Gate && (R.NeedWx > 0 || R.NeedXdai > 0))
-        {
-            static string F(double v, int d) => v.ToString("N" + d, System.Globalization.CultureInfo.InvariantCulture);
-            UIElement St(double have, double need) => have >= need ? Pill("Sufficient", tone: "ok") : Pill("Needed");
-            // round up, so the amount shown is always enough
-            static double Up(double v, int d) => Math.Ceiling(v * Math.Pow(10, d)) / Math.Pow(10, d);
-            right.Children.Add(Grp(
-                Card(null, "wxHOPR", $"Pays for your traffic · on the node now: {F(R.HaveWx, 2)}", HS(8, Mono(F(Up(R.NeedWx, 2), 2), 14, bold: true), St(R.HaveWx, R.NeedWx))),
-                Card(null, "xDAI", $"Pays network fees · on the node now: {F(R.HaveXdai, 4)}", HS(8, Mono(F(Up(R.NeedXdai, 4), 4), 14, bold: true), St(R.HaveXdai, R.NeedXdai)))));
-            right.Children.Add(Cap("These are the amounts the Gnosis VPN node needs to start. It continues by itself once they arrive."));
-        }
-        else right.Children.Add(Cap("Send wxHOPR on Gnosis Chain to this address to top up. Your balance updates by itself."));
-        // the "Gnosis Chain only" note, with the network name in bold
-        var ib = (InfoBar)right.Children[0]; ib.Title = ""; ib.Message = "";
-        var note = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = T(0, 0, 0, 12) }; note.Inlines.Add(new Run { Text = "Send on " }); note.Inlines.Add(new Run { Text = "Gnosis Chain", FontWeight = FontWeights.SemiBold }); note.Inlines.Add(new Run { Text = " only. Other networks won’t arrive." });
-        ib.Content = note;
-        var grid = new Grid { ColumnSpacing = 16 };
-        bool stack = w.PaneMode == "m" || S.Gate && w.AppWindow.Size.Width < 700;
-        if (stack) { var v = V(16, left, right); grid.Children.Add(v); }
-        else
-        {
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(300) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            left.VerticalAlignment = VerticalAlignment.Top; grid.Children.Add(left); Grid.SetColumn(right, 1); grid.Children.Add(right);
-        }
-        return Page(head, grid);
     }
 
     public UIElement BalanceFlyout()
@@ -505,7 +470,7 @@ public sealed class Pages
         p.Children.Add(Grp(
             Card("location", "Preferred exit", S.Mode == "auto" ? "Auto · best" : e.City, Btn("Change", () => Act("pick"))),
             Card("monitoring", "Detailed metrics", "Ping, route quality and the exit table.", Toggle(!S.Simple, () => Act("view"), "Detailed metrics")),
-            Card("person", "Exit icons", null, Combo(new[] { ("node", "Node icon"), ("flag", "Flags"), ("none", "None") }, S.Icons, v => Act("icons", v: v))),
+            Card("person", "Exit icons", null, Combo(new[] { ("country", "Country"), ("node", "Node icon"), ("flag", "Flags"), ("none", "None") }, S.Icons, v => Act("icons", v: v))),
             Card("public", "App theme", null, Combo(new[] { ("system", "Use system setting"), ("light", "Light"), ("dark", "Dark") }, w.U.Mode, v => { w.U.Mode = v; Prefs.Save("mode", v); w.Render(); }))));
         p.Children.Add(Section("About"));
         var ver = System.Reflection.CustomAttributeExtensions.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(typeof(App).Assembly)?.InformationalVersion ?? "?";

@@ -46,4 +46,14 @@ for f in ("uninstall.ps1", "common.ps1"):
 # Uninstall.cmd removes the installer's Apps entry (same AppId)
 appid = re.search(r"^AppId=\{\{([0-9A-F-]{36})\}$", iss, re.M).group(1)
 assert "{" + appid + "}_is1" in uninstall, "uninstall.ps1 does not remove the installer's entry"
+# one icon everywhere: the installer, the .exe (taskbar, Explorer, Apps list) and the tray icons
+# (winui/tools/gen_icons.py derives the tray and installer images from the app icon)
+for key, files in (("SetupIconFile", ["../../winui/GnosisVpn/Assets/app.ico"]),
+                   ("WizardImageFile", ["wizard-164.bmp", "wizard-328.bmp"]),
+                   ("WizardSmallImageFile", ["wizard-small-55.bmp", "wizard-small-110.bmp"])):
+    m = re.search(r"^" + key + r"=(.+)$", iss, re.M)
+    assert m and [f.replace("\\", "/") for f in m.group(1).strip().split(",")] == files, key + " is not the app icon's"
+    for f in files: assert os.path.isfile(os.path.join(root, "dist/windows", f)), f + " missing"
+assert "<ApplicationIcon>Assets\\app.ico</ApplicationIcon>" in read("winui/GnosisVpn/GnosisVpn.csproj"), "the .exe has no app icon"
+for st in ("off", "ok", "warn", "bad"): assert os.path.isfile(os.path.join(root, "winui/GnosisVpn/Assets", f"tray-{st}.ico"))
 print("build consistency ok")

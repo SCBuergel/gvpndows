@@ -63,6 +63,12 @@ public static class SelfTest
         Check(g.S.Conn == "connected" && g.S.Loc == "gvpn-lt-1-ynm1", "connected to the reported destination");
         Check(Math.Abs(g.S.ConnSec - 90) < 5, "connection time from since");
         Check(Math.Round(g.Left("gvpn-lt-1-ynm1")) == 639, "MB left from PIX bytes_left");
+        Check(g.S.EmptyIn == null && Ui.Pages.Expiry(g) == "639 MB left · Auto-renew on", "expiry line without empty_in: data left and renewal");
+        rb.ApplyForTest(State("{\"type\":\"running\"}", connected.Replace("\"bytes_left\":639202344", "\"bytes_left\":639202344,\"empty_in\":1080000")), null);
+        Check(g.S.EmptyIn == 1080 && Ui.Pages.Expiry(g) == "Expires in 18 min · 639 MB left · Auto-renew on", "expiry line from pix.empty_in");
+        Check(g.EX[0].Cc == "DE" && g.EX[2].Country == "Kenya" && RealBackend.CountryName("KE") == "Kenya" && RealBackend.CountryName("") == "Unknown", "country names for any ISO code (KE is Kenya)");
+        Check(AppEngine.FundingUrl("0x976909B05A46B60c0944b1afDFfb611d4C9D0d06") == "https://funding.vpn.gnosis.eth.limo/?address=0x976909B05A46B60c0944b1afDFfb611d4C9D0d06"
+              && AppEngine.FundingUrl("") == null && AppEngine.FundingUrl("0x12&x=1") == null, "funding portal link carries the VPN address");
         Check(g.ExOrNull("gvpn-lt-1-ynm1")?.Ping == 74, "ping from tunnel_ping_rtt");
         Check(Math.Abs(g.S.Balance - Math.Round(24.66 * 660.160512 / 5.941444608)) < 1, "balance in MB at the chunk price");
         // three chunks: bytes_bought and cost cover all of them, so the rate and the balance stay the same

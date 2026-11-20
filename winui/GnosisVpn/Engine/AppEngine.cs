@@ -97,6 +97,11 @@ public sealed class AppEngine
 
     static readonly HashSet<string> KeepFlash = new() { "details", "row", "dismiss", "dismissMsg", "q", "ptab", "pall", "copy", "view", "icons" };
 
+    /// <summary>The funding portal, opened for this VPN address (the portal reads ?address=).</summary>
+    public const string FUNDING_PORTAL = "https://funding.vpn.gnosis.eth.limo/";
+    public static string? FundingUrl(string addr) =>
+        System.Text.RegularExpressions.Regex.IsMatch(addr ?? "", "^0x[0-9a-fA-F]{40}$") ? FUNDING_PORTAL + "?address=" + addr : null;
+
     // ---------- actions ----------
     /// <param name="a">action name</param><param name="id">exit id</param><param name="v">value</param><param name="k">message key</param>
     public void Act(string a, string? id = null, string? v = null, string? k = null)
@@ -107,7 +112,7 @@ public sealed class AppEngine
         {
             case "settings": Go("settings"); break;
             case "back": Back(); break;
-            case "icons": S.Icons = v ?? "node"; break;
+            case "icons": S.Icons = v ?? "country"; break;
             case "details": S.Details = !S.Details; break;
             case "row": S.OpenRow = S.OpenRow == id ? null : id; break;
             case "dismiss": S.Flash = S.Fq.Count > 0 ? Shift(S.Fq) : null; break;
@@ -120,7 +125,9 @@ public sealed class AppEngine
                 }
             case "addData": Go("add"); break;
             case "copy": S.CopiedAt = Now; Toast("Address copied"); break;
-            case "gateDirect": Go("direct"); break;
+            case "fundPortal":
+                if (FundingUrl(Real.NodeAddress) is string url) _ = Windows.System.Launcher.LaunchUriAsync(new Uri(url));
+                break;
             case "pick": Go("pick"); S.Ptab = "best"; S.Pall = false; S.Q = ""; break;
             case "ptab": S.Ptab = v ?? "best"; break;
             case "pall": S.Pall = true; break;

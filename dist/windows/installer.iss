@@ -36,6 +36,10 @@ SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayName=Gnosis VPN
 UninstallDisplayIcon={commonpf64}\Gnosis VPN\GnosisVPN.exe
+; The app's icon everywhere (winui/tools/gen_icons.py derives the images from it)
+SetupIconFile=..\..\winui\GnosisVpn\Assets\app.ico
+WizardImageFile=wizard-164.bmp,wizard-328.bmp
+WizardSmallImageFile=wizard-small-55.bmp,wizard-small-110.bmp
 CloseApplications=no
 SetupLogging=yes
 

@@ -38,8 +38,9 @@ public static class SoloScreens
             var lead = Txt("Your funds pay the independent nodes that carry your traffic. Once they arrive, we find your best route.", 14, "text-2"); lead.TextAlignment = TextAlignment.Center; lead.MaxWidth = 380;
             var gvis = new Image { Source = new SvgImageSource(new Uri(Asset(Theme.Dark ? "gvis-dark.svg" : "gvis-light.svg"))), Width = 260 };
             var c = Col(logo, Title("Fund your VPN"), lead, gvis);
-            c.Children.Add(Btn("Send funds directly", () => G.Act("gateDirect"), "accent lg"));
-            c.Children.Add(Txt("Node " + G.Real.NodeAddress, 12, "text-2"));
+            c.Children.Add(Btn("Open the funding portal", () => G.Act("fundPortal"), "accent lg", trail: "open_in_new", disabled: AppEngine.FundingUrl(G.Real.NodeAddress) == null));
+            var addr = Mono(G.Real.NodeAddress, 12, "text-2"); addr.IsTextSelectionEnabled = true; addr.TextAlignment = TextAlignment.Center;
+            c.Children.Add(addr);
             return Center(c);
         }
         if (key == "sync")

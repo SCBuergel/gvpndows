@@ -11,8 +11,8 @@ using Windows.UI;
 namespace GnosisVpn.Testing;
 
 /// <summary>`GnosisVPN.exe --gen-icons DIR`: renders the app icon (the prototype's .appi: dark
-/// gradient tile with the lime key) and the notification-area icons (shield, colored by state) with
-/// Win2D, as PNG and multi-size ICO. Run once; the files are committed under Assets/.</summary>
+/// gradient tile with the lime key) with Win2D, as PNG and multi-size ICO. Run once; the files are
+/// committed under Assets/. winui/tools/gen_icons.py derives the tray icons from it.</summary>
 public static class IconGen
 {
     static string Svg(string pathKey, string fill, double size) =>
@@ -54,20 +54,7 @@ public static class IconGen
         var app = new List<(int, byte[])>();
         foreach (var s in new[] { 16, 24, 32, 48, 64, 256 }) { var png = Png(dev, s, AppTile); app.Add((s, png)); if (s == 32 || s == 256 || s == 48) File.WriteAllBytes(Path.Combine(dir, $"appicon-{s}.png"), png); }
         Ico(Path.Combine(dir, "app.ico"), app);
-        // tray: shield (filled), colored by state, with a dot for connected / paused (tray-dot in app.css)
-        var states = new Dictionary<string, (string fill, string? dot)> { ["off"] = ("#8a8992", null), ["ok"] = ("#8DC60C", "#8DC60C"), ["warn"] = ("#fce100", null), ["bad"] = ("#ff99a4", "#c42b1c") };
-        foreach (var (st, (fill, dot)) in states)
-        {
-            var imgs = new List<(int, byte[])>();
-            foreach (var s in new[] { 16, 20, 24, 32, 48 })
-                imgs.Add((s, Png(dev, s, (ds, px) =>
-                {
-                    using var doc = CanvasSvgDocument.LoadFromXml(dev, Svg("shield_lock:f", fill, px));
-                    ds.DrawSvg(doc, new Windows.Foundation.Size(px, px));
-                    if (dot != null) { var d = px * 0.34f; ds.FillCircle(px - d / 2, px - d / 2, d / 2 + px * 0.06f, Color.FromArgb(255, 0x20, 0x20, 0x24)); ds.FillCircle(px - d / 2, px - d / 2, d / 2, Microsoft.UI.ColorHelper.FromArgb(255, Convert.ToByte(dot[1..3], 16), Convert.ToByte(dot[3..5], 16), Convert.ToByte(dot[5..7], 16))); }
-                })));
-            Ico(Path.Combine(dir, $"tray-{st}.ico"), imgs);
-        }
+        // the tray icons and the installer images are derived from appicon-256.png by winui/tools/gen_icons.py
         File.WriteAllText(Path.Combine(dir, "done.txt"), "ok");
         return true;
     }

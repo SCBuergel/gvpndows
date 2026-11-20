@@ -157,7 +157,7 @@ public sealed partial class MainWindow : Window
         var r = Route();
         foreach (var (k, it) in navItems)
         {
-            bool on = r == k || (k == "balance" && r == "direct");
+            bool on = r == k;
             if (on && !ReferenceEquals(Nav.SelectedItem, it)) Nav.SelectedItem = it;
             string? badge = k switch
             {
@@ -187,7 +187,7 @@ public sealed partial class MainWindow : Window
     {
         string? Val(string k) => k switch
         {
-            "timer" => Hms(S.ConnSec),
+            "expiry" => Pages.Expiry(G),
             "left" => Math.Round(G.Left()) + " MB",
             "sypct" => S.SyncT is double t1 ? (Math.Min(SoloScreens.SYNC_LEN, t1) / SoloScreens.SYNC_LEN * 100).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "%" : null,
             "systep" => S.SyncT is double t2 ? SoloScreens.SyncStep(t2) : null,
@@ -233,7 +233,7 @@ public sealed partial class MainWindow : Window
         Renders++;
         ApplyTheme();
         var bk = BaseKey();
-        bool navShown = bk == "home" || (bk == "gate" && G.Page == "direct");
+        bool navShown = bk == "home";
         Nav.Visibility = navShown && bk == "home" ? Visibility.Visible : Visibility.Collapsed;
         Solo.Visibility = Nav.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
         Solo.Background = Theme.Br("layer"); Solo.BorderBrush = Theme.Br("stroke");
@@ -261,13 +261,12 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            var direct = bk == "gate" && G.Page == "direct";
-            // the funding page shows the node's balances and the Copy feedback: rebuild when they change
-            var sig = $"{Theme.Dark}|{bk}|{G.Page}|{S.Fail?.Code}|{S.Fail?.Title}|{G.Real.NeedWx}|{G.Real.NodeAddress}" + (direct ? "|" + pages.Signature("direct") : "");
+            // the fund-first screen shows the node's address: rebuild when it changes
+            var sig = $"{Theme.Dark}|{bk}|{G.Page}|{S.Fail?.Code}|{S.Fail?.Title}|{G.Real.NodeAddress}";
             if (sig != curSoloSig)
             {
                 live.Clear();
-                SoloHost.Content = direct ? pages.Build("direct") : SoloScreens.Build(this, bk);
+                SoloHost.Content = SoloScreens.Build(this, bk);
                 curSoloSig = sig;
             }
         }

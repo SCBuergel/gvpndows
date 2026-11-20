@@ -176,11 +176,12 @@ public static class Kit
         return p;
     }
 
-    /// <summary>The quality line: weak routes in red (qline() in common.js).</summary>
+    /// <summary>The quality line next to an exit. A weak route gets no words (it read as alarming);
+    /// its bars still show it.</summary>
     public static TextBlock QLine(AppEngine g, Exit e)
     {
         var gr = g.GradeOf(e);
-        return Txt(gr.Label, 12, gr.K == "weak" ? "sev-bad" : "text-2");
+        return Txt(gr.K == "weak" ? "" : gr.Label, 12, "text-2");
     }
 
     public static Brush PingBrush(int p) => Theme.Br(p < 500 ? "sev-ok" : p < 900 ? "sev-warn" : "sev-bad");

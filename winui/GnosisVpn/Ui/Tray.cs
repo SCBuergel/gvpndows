@@ -102,7 +102,7 @@ public static class Tray
         if (G.IsOn) { var l = HS(0, w.Live("left", Mono("", 12, "text-2")), Txt(" left here", 12, "text-2")); l.HorizontalAlignment = HorizontalAlignment.Right; l.VerticalAlignment = VerticalAlignment.Center; st.Children.Add(l); }
         var locRow = new Grid { ColumnSpacing = 12 };
         locRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); locRow.ColumnDefinitions.Add(new ColumnDefinition()); locRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        if (ExitIcons.For(e.Id, S.Icons) is FrameworkElement xi) locRow.Children.Add(xi);
+        if (ExitIcons.For(e.Id, S.Icons, cc: e.Cc) is FrameworkElement xi) locRow.Children.Add(xi);
         var lt = V(2, Txt(e.Country, 14), HS(6, Bars(G, e), Txt(g.Label, 12, "text-2"))); Grid.SetColumn(lt, 1); locRow.Children.Add(lt);
         var chev = Icons.Icon("chevron_right", 16); Grid.SetColumn(chev, 2); chev.VerticalAlignment = VerticalAlignment.Center; locRow.Children.Add(chev);
         var loc = new Button { Content = locRow, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Padding = T(12, 10, 12, 10) };

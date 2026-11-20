@@ -11,8 +11,9 @@ using static GnosisVpn.Engine.AppEngine;
 
 namespace GnosisVpn.Ui;
 
-/// <summary>Exit icons: a pixel bot per exit generated from its id (botURI() in common.js, same hash
-/// and random sequence, so each exit gets the same bot as in the prototype), the Auto icon, or a flag.</summary>
+/// <summary>Exit icons: the exit's country code as a label (the default), a pixel bot per exit
+/// generated from its id (botURI() in common.js, same hash and random sequence, so each exit gets the
+/// same bot as in the prototype), the Auto icon, or a flag.</summary>
 public static class ExitIcons
 {
     static (Color c1, Color c2, Color bg) Palette() => Theme.Dark
@@ -97,13 +98,21 @@ public static class ExitIcons
         return null;
     }
 
+    /// <summary>The country code as a label: "DE", "KE"; "?" when the network gives none.</summary>
+    static FrameworkElement Code(string cc, bool large) => new TextBlock
+    {
+        Text = cc == "" ? "?" : cc, FontFamily = Theme.Mono, FontSize = large ? 15 : 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        Foreground = Theme.Br("text-2"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+    };
+
     /// <summary>xicon(): 32 × 24 (or 48 × 36 when large), rounded, by the "Exit icons" setting.</summary>
-    public static FrameworkElement? For(string id, string iconsSetting, bool large = false)
+    public static FrameworkElement? For(string id, string iconsSetting, bool large = false, string cc = "")
     {
         if (iconsSetting == "none") return null;
         double w = large ? 48 : 32, h = large ? 36 : 24;
         FrameworkElement inner;
         if (id == "auto") inner = Auto();
+        else if (iconsSetting == "country") inner = Code(cc, large);
         else if (iconsSetting == "flag" && Flag(id) is ImageSource src) inner = new Image { Source = src, Stretch = Stretch.UniformToFill };
         else inner = Bot(id);
         return new Border { Width = w, Height = h, CornerRadius = new CornerRadius(large ? 6 : 4), Background = Theme.Br("sel"), Child = inner, VerticalAlignment = VerticalAlignment.Center };

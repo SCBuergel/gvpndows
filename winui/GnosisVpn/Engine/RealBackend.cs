@@ -175,6 +175,15 @@ public sealed class RealBackend
         ["BR"] = "Brazil", ["JP"] = "Japan", ["SG"] = "Singapore", ["KR"] = "South Korea", ["IN"] = "India", ["AU"] = "Australia", ["UA"] = "Ukraine", ["DK"] = "Denmark", ["NO"] = "Norway", ["BE"] = "Belgium", ["IE"] = "Ireland",
     };
 
+    /// <summary>The country's English name for an ISO code: the list above, else Windows' region
+    /// names (any code the network reports, "KE" -> "Kenya"), else the code itself.</summary>
+    public static string CountryName(string cc)
+    {
+        if (cc == "") return "Unknown";
+        if (COUNTRY.TryGetValue(cc.ToUpperInvariant(), out var n)) return n;
+        try { return new System.Globalization.RegionInfo(cc).EnglishName; } catch (ArgumentException) { return cc; }
+    }
+
     public RealBackend(AppEngine g, Action<Action> ui)
     {
         this.g = g; this.ui = ui;
@@ -253,7 +262,7 @@ public sealed class RealBackend
     {
         var S = g.S;
         if (S.Conn != "idle") g.SetFlash("bad", "Your VPN connection ended.", why); // beside, not instead of, an S.Fail screen
-        S.Conn = "idle"; S.ConnSec = 0; pendingConnect = null; attemptDest = null; S.Alloc.Clear();
+        S.Conn = "idle"; S.ConnSec = 0; S.EmptyIn = null; pendingConnect = null; attemptDest = null; S.Alloc.Clear();
     }
 
     void Apply(JsonNode? st, JsonNode? bal)
@@ -325,7 +334,7 @@ public sealed class RealBackend
                 var check = probe?["type"]?.ToString() == "checked" ? probe : probe?["last"];
                 var e = new Exit
                 {
-                    Id = id, Country = COUNTRY.GetValueOrDefault(cc, cc == "" ? "Unknown" : cc), Place = x["meta"]?["description"]?.ToString() ?? "",
+                    Id = id, Country = CountryName(cc), Cc = cc.ToUpperInvariant(), Place = x["meta"]?["description"]?.ToString() ?? "",
                     Routable = routable,
                     Measured = walk?["type"]?.ToString() == "paths",
                     Pv = walk?["best_value"]?.GetValue<double>() ?? 0,
@@ -424,6 +433,8 @@ public sealed class RealBackend
         foreach (var id in S.Alloc.Keys.Where(k => k != live).ToList()) S.Alloc.Remove(id);
         if (live != null && pix?["bytes_left"] is JsonNode bl) S.Alloc[live] = Ms(bl) / 1e6;
         else if (live != null) S.Alloc.Remove(live);
+        // when that data runs out at the current rate; the core leaves it out while it cannot tell
+        S.EmptyIn = live != null && pix?["empty_in"] is JsonNode ei ? Ms(ei) / 1000.0 : null;
         var waiting = conn?["stall"]?["awaiting_payment_since"] != null;
         var pixPhase = pix?["phase"]?["type"]?.ToString();
         if (kind == "connected" && !dropped && (waiting || pixPhase == "payment_failed"))
