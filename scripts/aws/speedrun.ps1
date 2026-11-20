@@ -1,7 +1,7 @@
 # Speed runs through the app on the test server (runs in the desktop session, see windesk.sh):
 # for each exit, the app connects (as a click on Connect), then a 90 MB download and a 90 MB upload,
 # each capped at 5 min, with per-second throughput. Results: C:\gv\speed\<exit>-down.csv / -up.csv, run.log
-param([string]$Exits = "lt,ger", [long]$Bytes = 90000000, [int]$MaxS = 300)
+param([string]$Exits = "lt,ger", [long]$Bytes = 90000000, [int]$MaxS = 300, [string]$App = "C:\Program Files\Gnosis VPN\GnosisVPN.exe")
 $ErrorActionPreference = "Continue"
 $env:DOTNET_ROOT = "C:\dotnet"
 $out = "C:\gv\speed"; New-Item -ItemType Directory -Force $out | Out-Null
@@ -15,7 +15,7 @@ Remove-Item "$out\*" -ErrorAction SilentlyContinue
 foreach ($x in $Exits.Split(",")) {
   Get-Process GnosisVPN -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep 2
   Log "=== ${x}: app starts and connects"
-  Start-Process C:\gv\app\GnosisVPN.exe -ArgumentList "--click-connect", $x
+  Start-Process $App -ArgumentList "--click-connect", $x
   $t0 = Get-Date; $dest = $null
   while (((Get-Date) - $t0).TotalSeconds -lt 300) {
     Start-Sleep 2
