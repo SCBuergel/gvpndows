@@ -117,6 +117,21 @@ public static class SelfTest
         Check(g.S.Alloc.Count == 0 && g.Left("gvpn-lt-1-ynm1") == 0, "data left goes when the session ends");
         rb.ApplyForTest(State("{\"type\":\"running\"}", connected), null);
 
+        // ---- R7-8: after Disconnect the service's cached status (same connection) does not bring it back
+        var run = "{\"type\":\"running\"}";
+        rb.Handle("disconnect", null); var recentN = g.S.Recent.Count;
+        rb.ApplyForTest(State(run, connected), null);
+        Check(g.S.Conn == "idle" && g.S.Recent.Count == recentN, "a stale status after Disconnect stays idle");
+        rb.ApplyForTest(State(run), null); rb.ApplyForTest(State(run, connected), null);
+        Check(g.S.Conn == "connected", "after a disconnected status the connection shows again");
+        rb.Handle("disconnect", null); rb.AgeDisconnectForTest(11_000);
+        rb.ApplyForTest(State(run, connected), null);
+        Check(g.S.Conn == "connected", "the stale-status guard ends after 10 s");
+        rb.Handle("disconnect", null);
+        rb.ApplyForTest(State(run, connected.Replace($"\"since\":{since}", $"\"since\":{since + 1000}")), null);
+        Check(g.S.Conn == "connected", "a newer connection is shown at once");
+        rb.ApplyForTest(State(run, connected), null);
+
         // ---- actions: connect / switch / disconnect go to the service
         Check(rb.Handle("pick2", "gvpn-ger-1-j9os") && g.S.Conn == "connecting" && g.S.Loc == "gvpn-ger-1-j9os", "a pick connects through the service");
         rb.ApplyForTest(State("{\"type\":\"running\"}", $"{{\"type\":\"connecting\",\"destination\":\"gvpn-ger-1-j9os\",\"since\":{since},\"phase\":{{\"type\":\"init\"}}}}"), null);

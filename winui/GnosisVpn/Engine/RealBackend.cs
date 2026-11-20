@@ -129,6 +129,11 @@ public sealed class RealBackend
     string? attemptDest; bool attemptSeen; double attemptAt; int polls; double lastPollLog, pollStart, lastStuckLog; volatile string afterSend = "";
     bool polling; double lastBalance = -1e9; string? pendingConnect; double pendingAt;
     const double PENDING_MS = 180_000;
+    // The connection last shown, and the one the user disconnected (or cancelled) and when: the
+    // service's cached status (up to 3 s old) keeps showing it for a moment, for at most DROP_MS.
+    string? shownDest; long shownSince; string? droppedDest; long droppedSince; double droppedAt; bool dropping;
+    const double DROP_MS = 10_000;
+    public void AgeDisconnectForTest(double ms) => droppedAt -= ms;
     public string NodeAddress { get; private set; } = "";
     /// <summary>Funds on the node and what the core asks for before it can start (wxHOPR, xDAI), while it waits for funds.</summary>
     public double HaveWx { get; private set; }
@@ -339,11 +344,16 @@ public sealed class RealBackend
         // but no longer tries it: that ends the attempt.
         bool dead = attemptDest != null && health.GetValueOrDefault(attemptDest)?["state"]?["type"]?.ToString() == "unrecoverable";
         bool headed = attemptDest != null && !dead && (target == attemptDest || pendingConnect != null && !attemptSeen);
+        // After Disconnect/Cancel: a status still showing that same connection is the stale cache.
+        if (dropping && (AppEngine.Now - droppedAt > DROP_MS || kind is null or "disconnected" || curId != droppedDest || since != droppedSince)) dropping = false;
+        bool dropped = dropping && !headed;
+        if (kind is "connecting" or "reconnecting" or "connected") { shownDest = curId; shownSince = since; } else shownDest = null;
         if (headed && curId != attemptDest)
         {
             if (S.Conn != "connecting") { S.CStart = AppEngine.Now; S.CDur = 90000; }
             S.Conn = "connecting"; S.Loc = attemptDest!;
         }
+        else if (dropped) S.Conn = "idle";
         else switch (kind)
         {
             case "connecting":
@@ -389,7 +399,7 @@ public sealed class RealBackend
             if (chunk > 0) ChunkMb = chunk;
         }
         // Data left belongs to the session: only the current exit's, while its session is up (0 when used up).
-        var live = kind is "connecting" or "reconnecting" or "connected" ? curId : null;
+        var live = !dropped && kind is "connecting" or "reconnecting" or "connected" ? curId : null;
         foreach (var id in S.Alloc.Keys.Where(k => k != live).ToList()) S.Alloc.Remove(id);
         if (live != null && pix?["bytes_left"] is JsonNode bl) S.Alloc[live] = Ms(bl) / 1e6;
         else if (live != null) S.Alloc.Remove(live);
@@ -487,7 +497,7 @@ public sealed class RealBackend
             if (S.Stack.LastOrDefault() == "pick") S.Stack.RemoveAt(S.Stack.Count - 1);
             S.Loc = dest; S.Conn = "connecting"; S.CStart = AppEngine.Now; S.CDur = 90000; pendingConnect = dest; pendingAt = AppEngine.Now;
             if (a == "pick2" || a == "auto") S.Mode = a == "auto" ? "auto" : "manual";
-            attemptDest = dest; attemptSeen = false; attemptAt = AppEngine.Now;
+            attemptDest = dest; attemptSeen = false; attemptAt = AppEngine.Now; dropping = false;
             _ = Task.Run(async () =>
             {
                 var r = await cmdLink.Send(new { type = "connect", destination = dest }, 70000, retry: false);
@@ -500,6 +510,7 @@ public sealed class RealBackend
         {
             attemptDest = null;
             S.Conn = "idle"; pendingConnect = null;
+            if (shownDest != null) { droppedDest = shownDest; droppedSince = shownSince; droppedAt = AppEngine.Now; dropping = true; }
             _ = Task.Run(async () => { var r = await cmdLink.Send(new { type = "disconnect" }, 70000, retry: false); App.Log("service: disconnect -> " + (r?.ToJsonString() is string j ? j[..Math.Min(200, j.Length)] : "no reply")); });
             return true;
         }
