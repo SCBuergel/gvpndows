@@ -1,4 +1,4 @@
-//! App log: kept in memory for the log pane and appended to a file the user can send back.
+//! Service log: kept in memory (the newest lines, for the debug relay) and appended to a file.
 //! Windows: %LOCALAPPDATA%\gvpndows\gvpndows.log; past pure::LOG_FILE_MAX it moves to gvpndows.old.log.
 
 use std::fs::{File, OpenOptions};
@@ -97,10 +97,6 @@ pub fn since(cursor: u64) -> (Vec<String>, u64, u64) {
     let new = (total - cursor.min(total)) as usize;
     let take = new.min(l.len());
     (l[l.len() - take..].to_vec(), total, (new - take) as u64)
-}
-
-pub fn snapshot() -> Vec<String> {
-    LOG.get().and_then(|l| l.lines.lock().ok().map(|v| v.clone())).unwrap_or_default()
 }
 
 /// UTC time as "YYYY-MM-DD HH:MM:SS.mmmZ" without a date crate.

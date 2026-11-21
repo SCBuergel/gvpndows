@@ -1,15 +1,15 @@
 //! ==================================================================================================
 //! DEBUG FEATURE ONLY: REMOVED FROM PRODUCTION RELEASES.
 //!
-//! The developer relay sends this client's log (and, in gnosis/backup.rs, the encrypted node
-//! identity) to a private ntfy.sh topic that the developer reads. It exists only to debug test
-//! builds on machines the developer cannot reach.
+//! The developer relay sends this client's log to an ntfy.sh topic that the developer reads (and,
+//! with the `debug-identity-backup` feature, gnosis/backup.rs sends the encrypted node identity
+//! once). It exists to debug builds on machines the developer cannot reach.
 //!
-//! It is compiled in only with the Cargo feature `debug-relay` (scripts/do-build/build-remote.sh
-//! turns it on for test builds). Without the feature, `src/relay_off.rs` is compiled instead: the
-//! same functions, doing nothing, so a release build contains no code that sends anything. A build
-//! with GVPNDOWS_RELEASE set refuses to compile with this feature (see the assertion below).
-//! Production release checklist: README.md, "Production release".
+//! It is compiled in only with the Cargo feature `debug-relay`: the "DEBUG-logging" release (built
+//! by GitHub Actions, logs only) and private test builds (scripts/do-build, with the identity
+//! backup). Without the feature, `src/relay_off.rs` is compiled instead: the same functions, doing
+//! nothing, so a release build contains no code that sends anything. A build with
+//! GVPNDOWS_RELEASE set refuses to compile with this feature (see the assertion below).
 //! ==================================================================================================
 //!
 //! What is sent: the newest log lines, compressed (zlib) and sealed to the developer's X25519 key
@@ -81,13 +81,6 @@ fn post(title: &str, body: &str) -> Result<(), String> {
             ureq::Error::Status(429, _) => "rate limited (429)".to_string(),
             e => e.to_string(),
         })
-}
-
-pub fn send_key(public_key: String) {
-    std::thread::spawn(move || match post("gvpndows public key", &format!("pubkey {public_key}")) {
-        Ok(()) => crate::log::line("public key sent to the developer"),
-        Err(e) => crate::log::line(format!("sending the public key failed: {e}")),
-    });
 }
 
 /// Blocking post used by --selftest to prove the relay works from the Windows binary.
@@ -170,7 +163,7 @@ pub fn bypass_hosts() -> Vec<&'static str> {
     if available() { vec!["ntfy.sh"] } else { Vec::new() }
 }
 
-/// Older callers (the e2e check, the egui app's button): same as flush_now.
+/// Sends what the log has now (after the diagnostics in gnosis/mod.rs): same as flush_now.
 pub fn send_log() {
     let _ = flush_now();
 }

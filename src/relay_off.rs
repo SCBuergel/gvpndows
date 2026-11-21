@@ -15,8 +15,6 @@ pub fn post_text(_title: &str, _body: &str) -> Result<(), String> {
     Err("release build: no developer relay".into())
 }
 
-pub fn send_key(_public_key: String) {}
-
 pub fn send_log() {}
 
 pub fn selftest() -> Result<(), String> {

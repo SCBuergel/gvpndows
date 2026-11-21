@@ -43,6 +43,10 @@ enum Cond {
 }
 
 impl KillSwitch {
+    /// A full kill switch. Nothing calls it since the service's own test window (and its plain
+    /// WireGuard tunnel) was removed; kept as the starting point for a kill switch of the Gnosis
+    /// VPN tunnel (README: "What it protects").
+    #[allow(dead_code)]
     pub fn enable(tunnel_luid: u64, endpoint: SocketAddrV4) -> Result<Self, String> {
         unsafe { Self::open("gvpndows kill switch", SUBLAYER, |ks| ks.add_all(tunnel_luid, endpoint)) }
     }
@@ -88,6 +92,7 @@ impl KillSwitch {
         Ok(ks)
     }
 
+    #[allow(dead_code)]
     unsafe fn add_all(&self, tunnel_luid: u64, endpoint: SocketAddrV4) -> Result<(), String> {
         let ep_ip = u32::from(*endpoint.ip()); // WFP wants IPv4 addresses in host byte order
         let layers_v4 = [FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4];

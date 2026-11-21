@@ -4,11 +4,14 @@
 #   app      (Windows) the WinUI 3 app (self-contained)
 #   package  (Windows) the zip package (Install.cmd) and GnosisVPN-Setup-<version>.exe (Inno Setup)
 #            and installs, checks and uninstalls it on the runner
-# A tag v* publishes both as a GitHub release (a pre-release when the tag has a "-").
+# A tag v* publishes them as a GitHub release (a pre-release when the tag has a "-").
 #
-# Always a release build: no developer relay (GVPNDOWS_RELEASE=1 makes a build with the
-# debug-relay feature fail). Debug builds carry the relay topic in the .exe and must never be
-# published, so they are built only on the rented build machine (scripts/do-build, see README.md).
+# Two flavours of the service, and so of each package:
+#   release        GVPNDOWS_RELEASE=1: no developer relay (a build with a debug feature fails)
+#   DEBUG-logging  the debug-relay feature: the service streams its log, sealed to the developer's
+#                  key, to the ntfy.sh topic below; "DEBUG-logging" is in every file name. Never the
+#                  identity backup (a separate feature), which stays in private test builds.
+# No repository secrets are read: everything built here may become public.
 name: Windows installer
 
 on:
@@ -33,6 +36,11 @@ env:
   DEB_SHA256: 8ba5a522b877f20f1a5e14ac8d5e3657fcec906d73536e6267a0f073753371e8
   WINTUN_URL: https://www.wintun.net/builds/wintun-0.14.1.zip
   WINTUN_SHA256: 07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51
+  # DEBUG-logging flavour only: the ntfy.sh topic its service streams the log to, and the developer's
+  # X25519 public key the log is sealed to. Both are public on purpose: they are inside every
+  # DEBUG-logging .exe anyway. This topic is only for these public builds.
+  DEBUG_NTFY_TOPIC: gvpndows-debug-cb6788e9485be23d
+  DEBUG_LOG_PUBKEY: tLqy/7g3VJ4cSQa+wQsogq7Dw3i2epzvjVqSnyAvQ1U=
 
 jobs:
   data:
@@ -63,6 +71,10 @@ jobs:
         with: { name: gnosis-data, path: gnosis, retention-days: 7 }
 
   service:
+    strategy:
+      matrix:
+        flavour: [release, debug-logging]
+    name: service (${{ matrix.flavour }})
     runs-on: windows-2022
     timeout-minutes: 150
     defaults: { run: { shell: bash } }
@@ -111,14 +123,21 @@ jobs:
           rustup show active-toolchain || rustup toolchain install "$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)" --profile minimal
           rustc --version
       - uses: Swatinem/rust-cache@v2
-        with: { workspaces: client, shared-key: service }
-      - name: Build gvpndows.exe (release build)
+        with: { workspaces: client, shared-key: "service-${{ matrix.flavour }}" }
+      - name: Build gvpndows.exe (${{ matrix.flavour }})
+        env: { FLAVOUR: "${{ matrix.flavour }}" }
         run: |
           cd client
-          export GVPNDOWS_COMMIT=$(git -C ../src rev-parse --short HEAD) GVPNDOWS_RELEASE=1
-          unset GVPNDOWS_NTFY_TOPIC GVPNDOWS_BACKUP_PUBKEY
+          export GVPNDOWS_COMMIT=$(git -C ../src rev-parse --short HEAD)
+          unset GVPNDOWS_NTFY_TOPIC GVPNDOWS_BACKUP_PUBKEY GVPNDOWS_RELEASE
+          if [ "$FLAVOUR" = release ]; then
+            export GVPNDOWS_RELEASE=1; features=""
+          else
+            # logs only: the debug-relay feature, never the identity backup
+            export GVPNDOWS_NTFY_TOPIC="$DEBUG_NTFY_TOPIC" GVPNDOWS_BACKUP_PUBKEY="$DEBUG_LOG_PUBKEY"; features="--features debug-relay"
+          fi
           set -o pipefail
-          cargo build --locked --release --target x86_64-pc-windows-msvc -p gvpndows 2>&1 | tee ../build.log
+          cargo build --locked --release --target x86_64-pc-windows-msvc -p gvpndows $features 2>&1 | tee ../build.log
           mkdir -p ../out && cp target/x86_64-pc-windows-msvc/release/gvpndows.exe ../out/
           sha256sum ../out/gvpndows.exe
       - name: Report build errors
@@ -127,16 +146,21 @@ jobs:
           [ -f build.log ] || exit 0
           grep -E "^(error|warning: unused)" -A12 build.log | head -c 3500 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g' | sed 's/^/::error title=cargo build::/'
           echo; tail -c 2500 build.log | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g' | sed 's/^/::error title=build.log tail::/'
-      - name: Self-test (starts, key handling, config parser)
+      - name: Self-test (starts; a DEBUG-logging build also posts to its relay)
+        env: { FLAVOUR: "${{ matrix.flavour }}" }
         run: |
           log="$(cygpath -u "$LOCALAPPDATA")/gvpndows/gvpndows.log"
           rm -f "$log"
           timeout 120 out/gvpndows.exe --selftest
           tail -20 "$log"
           grep -q "selftest ok" "$log"
-          if grep -E "selftest: (key error|config parser error)|DEBUG BUILD" "$log"; then exit 1; fi
+          if [ "$FLAVOUR" = release ]; then
+            if grep -E "selftest: (relay|sealed)|DEBUG BUILD" "$log"; then echo "::error::the release build has the developer relay"; exit 1; fi
+          else
+            grep -q "selftest: relay post ok" "$log" || { echo "::error::the DEBUG-logging build cannot post to its relay"; exit 1; }
+          fi
       - uses: actions/upload-artifact@v4
-        with: { name: service, path: out, retention-days: 7 }
+        with: { name: "service-${{ matrix.flavour }}", path: out, retention-days: 7 }
 
   app:
     runs-on: windows-2022
@@ -167,73 +191,96 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: { path: artifacts }
-      - name: Assemble the package folder
+      - name: Assemble the package folders (release, DEBUG-logging)
         shell: pwsh
         run: |
           $version = ([xml](Get-Content winui/GnosisVpn/GnosisVpn.csproj)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
           "VERSION=$version" >> $env:GITHUB_ENV
-          $p = "pkg/GnosisVPN"
-          New-Item -ItemType Directory -Force "$p/service", "$p/app" | Out-Null
-          Copy-Item dist/windows/Install.cmd, dist/windows/Uninstall.cmd, dist/windows/install.ps1, dist/windows/uninstall.ps1, dist/windows/common.ps1, dist/windows/README.txt $p
-          Copy-Item artifacts/service/gvpndows.exe "$p/service/"
-          Copy-Item artifacts/gnosis-data "$p/service/gnosis" -Recurse
-          Copy-Item artifacts/app/* "$p/app/" -Recurse
-          "Gnosis VPN for Windows $version (release build, commit $($env:GITHUB_SHA.Substring(0,7)))" | Set-Content "$p/BUILD.txt"
-          Get-ChildItem $p | Format-Table Name, Length
-      - name: Installer (Inno Setup)
+          foreach ($f in "release", "debug-logging") {
+            $p = "pkg-$f/GnosisVPN"
+            New-Item -ItemType Directory -Force "$p/service", "$p/app" | Out-Null
+            Copy-Item dist/windows/Install.cmd, dist/windows/Uninstall.cmd, dist/windows/install.ps1, dist/windows/uninstall.ps1, dist/windows/common.ps1 $p
+            Copy-Item artifacts/service-$f/gvpndows.exe "$p/service/"
+            Copy-Item artifacts/gnosis-data "$p/service/gnosis" -Recurse
+            Copy-Item artifacts/app/* "$p/app/" -Recurse
+            if ($f -eq "release") {
+              Copy-Item dist/windows/README.txt $p
+              "Gnosis VPN for Windows $version (release build, commit $($env:GITHUB_SHA.Substring(0,7)))" | Set-Content "$p/BUILD.txt"
+            } else {
+              Get-Content dist/windows/DEBUG-logging.txt, dist/windows/README.txt | Set-Content "$p/README.txt"
+              "Gnosis VPN for Windows $version DEBUG-logging (sends its log to the developer, commit $($env:GITHUB_SHA.Substring(0,7)))" | Set-Content "$p/BUILD.txt"
+            }
+            Get-ChildItem $p | Format-Table Name, Length
+          }
+      - name: Installers (Inno Setup)
         shell: pwsh
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { throw "Inno Setup 6 is not on this runner image" }
-          & $iscc /Q "/DAppVersion=$env:VERSION" "/DPayload=$PWD\pkg\GnosisVPN" "/DOutDir=$PWD\release" dist\windows\installer.iss
+          & $iscc /Q "/DAppVersion=$env:VERSION" "/DPayload=$PWD\pkg-release\GnosisVPN" "/DOutDir=$PWD\release" dist\windows\installer.iss
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      - name: Zip package
+          & $iscc /Q "/DAppVersion=$env:VERSION" "/DDebugLogging=1" "/DPayload=$PWD\pkg-debug-logging\GnosisVPN" "/DOutDir=$PWD\release" dist\windows\installer.iss
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Zip packages
         shell: pwsh
         run: |
           # .NET's ZipFile writes forward-slash entry names (Compress-Archive in Windows PowerShell does not)
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          [IO.Compression.ZipFile]::CreateFromDirectory("$PWD\pkg", "$PWD\release\GnosisVPN-windows-$env:VERSION.zip", [IO.Compression.CompressionLevel]::Optimal, $false)
+          [IO.Compression.ZipFile]::CreateFromDirectory("$PWD\pkg-release", "$PWD\release\GnosisVPN-windows-$env:VERSION.zip", [IO.Compression.CompressionLevel]::Optimal, $false)
+          [IO.Compression.ZipFile]::CreateFromDirectory("$PWD\pkg-debug-logging", "$PWD\release\GnosisVPN-windows-$env:VERSION-DEBUG-logging.zip", [IO.Compression.CompressionLevel]::Optimal, $false)
           $files = @(Get-ChildItem release -File)
           $files | ForEach-Object { "{0}  {1}  {2:N1} MB" -f (Get-FileHash $_.FullName).Hash.ToLower(), $_.Name, ($_.Length / 1MB) } | Tee-Object release/SHA256SUMS.txt
       - name: Check the package contents
         shell: pwsh
         run: |
-          $exe = "release\GnosisVPN-Setup-$env:VERSION.exe"; $zip = "release\GnosisVPN-windows-$env:VERSION.zip"
-          foreach ($f in $exe, $zip) { if (-not (Test-Path $f) -or (Get-Item $f).Length -lt 50MB) { throw "$f is missing or too small" } }
+          $relay = "streams its log, encrypted, to the developer"
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $names = [IO.Compression.ZipFile]::OpenRead("$PWD\$zip").Entries.FullName
-          foreach ($n in "GnosisVPN/Install.cmd", "GnosisVPN/install.ps1", "GnosisVPN/uninstall.ps1", "GnosisVPN/common.ps1", "GnosisVPN/service/gvpndows.exe", "GnosisVPN/service/gnosis/config.toml", "GnosisVPN/service/gnosis/geoip.mmdb", "GnosisVPN/app/GnosisVPN.exe") {
-            if ($n -notin $names) { throw "$zip lacks $n" }
+          foreach ($f in "release", "debug-logging") {
+            $sfx = if ($f -eq "release") { "" } else { "-DEBUG-logging" }
+            $exe = "release\GnosisVPN-Setup-$env:VERSION$sfx.exe"; $zip = "release\GnosisVPN-windows-$env:VERSION$sfx.zip"
+            foreach ($x in $exe, $zip) { if (-not (Test-Path $x) -or (Get-Item $x).Length -lt 50MB) { throw "$x is missing or too small" } }
+            $names = [IO.Compression.ZipFile]::OpenRead("$PWD\$zip").Entries.FullName
+            foreach ($n in "GnosisVPN/Install.cmd", "GnosisVPN/install.ps1", "GnosisVPN/uninstall.ps1", "GnosisVPN/common.ps1", "GnosisVPN/README.txt", "GnosisVPN/service/gvpndows.exe", "GnosisVPN/service/gnosis/config.toml", "GnosisVPN/service/gnosis/geoip.mmdb", "GnosisVPN/app/GnosisVPN.exe") {
+              if ($n -notin $names) { throw "$zip lacks $n" }
+            }
+            $svc = "pkg-$f\GnosisVPN\service\gvpndows.exe"
+            $has = Select-String -Path $svc -Pattern $relay -SimpleMatch -Quiet
+            if ($f -eq "release" -and $has) { throw "the release service has the developer relay" }
+            if ($f -ne "release" -and -not $has) { throw "the DEBUG-logging service has no developer relay" }
+            # the identity backup is never in a build from here
+            if (Select-String -Path $svc -Pattern "sending the encrypted identity backup" -SimpleMatch -Quiet) { throw "the $f service has the identity backup" }
           }
-          if (Select-String -Path pkg\GnosisVPN\service\gvpndows.exe -Pattern "streams its log, encrypted, to the developer" -SimpleMatch -Quiet) { throw "the service is a debug build (it has the developer relay)" }
-          "package ok"
+          "packages ok"
       - uses: actions/upload-artifact@v4
         with: { name: GnosisVPN-windows, path: release, retention-days: 30 }
-      - name: Install, check and uninstall on this runner
+      - name: Install, check and uninstall on this runner (both installers)
         shell: pwsh
         run: |
-          try {
-            $exe = "release\GnosisVPN-Setup-$env:VERSION.exe"
-            $p = Start-Process $exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$PWD\setup.log" -PassThru -Wait
-            Get-Content "${env:ProgramFiles}\Gnosis VPN Service\setup\install.log" -ErrorAction SilentlyContinue
-            if ($p.ExitCode -ne 0) { Get-Content setup.log -Tail 30; throw "setup exit $($p.ExitCode)" }
-            if ((Get-Service GnosisVPN).Status -ne "Running") { throw "service not running" }
-            if (-not (Test-Path "${env:ProgramFiles}\Gnosis VPN\GnosisVPN.exe")) { throw "app not installed" }
-            $u = (Get-ChildItem HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall | Get-ItemProperty | Where-Object DisplayName -eq "Gnosis VPN").UninstallString
-            if (-not $u) { throw "no uninstall entry" }
-            $p = Start-Process $u.Trim('"') -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -PassThru -Wait
-            if ($p.ExitCode -ne 0) { throw "uninstall exit $($p.ExitCode)" }
-            # the uninstaller continues from a copy of itself in the temp folder: wait for its result
-            foreach ($i in 1..60) { if (-not (Test-Path "${env:ProgramFiles}\Gnosis VPN Service")) { break }; Start-Sleep 1 }
-            if (Get-Service GnosisVPN -ErrorAction SilentlyContinue) { throw "service still installed" }
-            if (Test-Path "${env:ProgramFiles}\Gnosis VPN") { throw "app still installed" }
-            if (Test-Path "${env:ProgramFiles}\Gnosis VPN Service") { throw "service folder still there" }
-            "install and uninstall ok"
-          } catch {
-            $msg = "$_`n--- install.log`n" + ((Get-Content "${env:ProgramFiles}\Gnosis VPN Service\setup\install.log" -ErrorAction SilentlyContinue | Select-Object -Last 25) -join "`n") + "`n--- setup.log`n" + ((Get-Content setup.log -ErrorAction SilentlyContinue | Select-Object -Last 15) -join "`n") + "`n--- service log`n" + ((Get-Content C:\ProgramData\gvpndows\gvpndows.log -ErrorAction SilentlyContinue | Select-Object -Last 15) -join "`n")
-            $msg
-            "::error title=install test::" + ($msg -replace '%','%25' -replace "`r",'' -replace "`n",'%0A')
-            exit 1
+          foreach ($sfx in "", "-DEBUG-logging") {
+            try {
+              $exe = "release\GnosisVPN-Setup-$env:VERSION$sfx.exe"
+              "== $exe"
+              $p = Start-Process $exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$PWD\setup.log" -PassThru -Wait
+              Get-Content "${env:ProgramFiles}\Gnosis VPN Service\setup\install.log" -ErrorAction SilentlyContinue
+              if ($p.ExitCode -ne 0) { Get-Content setup.log -Tail 30; throw "setup exit $($p.ExitCode)" }
+              if ((Get-Service GnosisVPN).Status -ne "Running") { throw "service not running" }
+              if (-not (Test-Path "${env:ProgramFiles}\Gnosis VPN\GnosisVPN.exe")) { throw "app not installed" }
+              $u = (Get-ChildItem HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall | Get-ItemProperty | Where-Object DisplayName -like "Gnosis VPN*").UninstallString
+              if (-not $u) { throw "no uninstall entry" }
+              $p = Start-Process $u.Trim('"') -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -PassThru -Wait
+              if ($p.ExitCode -ne 0) { throw "uninstall exit $($p.ExitCode)" }
+              # the uninstaller continues from a copy of itself in the temp folder: wait for its result
+              foreach ($i in 1..60) { if (-not (Test-Path "${env:ProgramFiles}\Gnosis VPN Service")) { break }; Start-Sleep 1 }
+              if (Get-Service GnosisVPN -ErrorAction SilentlyContinue) { throw "service still installed" }
+              if (Test-Path "${env:ProgramFiles}\Gnosis VPN") { throw "app still installed" }
+              if (Test-Path "${env:ProgramFiles}\Gnosis VPN Service") { throw "service folder still there" }
+              "install and uninstall ok: $exe"
+            } catch {
+              $msg = "$exe`: $_`n--- install.log`n" + ((Get-Content "${env:ProgramFiles}\Gnosis VPN Service\setup\install.log" -ErrorAction SilentlyContinue | Select-Object -Last 25) -join "`n") + "`n--- setup.log`n" + ((Get-Content setup.log -ErrorAction SilentlyContinue | Select-Object -Last 15) -join "`n") + "`n--- service log`n" + ((Get-Content C:\ProgramData\gvpndows\gvpndows.log -ErrorAction SilentlyContinue | Select-Object -Last 15) -join "`n")
+              $msg
+              "::error title=install test::" + ($msg -replace '%','%25' -replace "`r",'' -replace "`n",'%0A')
+              exit 1
+            }
           }
       - name: GitHub release (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
@@ -242,5 +289,17 @@ jobs:
         run: |
           tag=${GITHUB_REF#refs/tags/}
           pre=""; case "$tag" in *-*) pre="--prerelease";; esac
-          gh release create "$tag" release/* $pre --title "Gnosis VPN for Windows $tag" \
-            --notes "Unsigned test build (release build, no developer relay). Run GnosisVPN-Setup-$VERSION.exe (SmartScreen: More info > Run anyway), or unzip the zip into your Downloads folder and run Install.cmd. SHA-256 sums in SHA256SUMS.txt."
+          cat > notes.md <<NOTES
+          **Prototype, for testing only.** Not a finished or supported product and not security-audited; there is no kill switch, so it may expose your traffic, and it spends real funds. Use small amounts and do not rely on it to protect you. No warranty (GNU GPL v3.0).
+
+          Two versions, the same app:
+
+          | File | What it is |
+          | --- | --- |
+          | \`GnosisVPN-Setup-$VERSION.exe\` | **Normal version.** Sends nothing to anyone. |
+          | \`GnosisVPN-Setup-$VERSION-DEBUG-logging.exe\` | **DEBUG-logging version.** The same, but the service sends its log, encrypted to the developer's key, to the developer (at most 240 messages per PC). Use it only if you want to help debug a problem. It never sends your node's keys. |
+
+          Both are unsigned: Windows SmartScreen asks; choose More info > Run anyway. The zips hold the same as the installers (unzip into your Downloads folder and run Install.cmd). Installing one replaces the other and keeps your node. SHA-256 sums: \`SHA256SUMS.txt\`.
+          NOTES
+          sed -i 's/^          //' notes.md
+          gh release create "$tag" release/* $pre --title "Gnosis VPN for Windows $tag" --notes-file notes.md

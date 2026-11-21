@@ -25,6 +25,12 @@ Windows service that creates the tunnel.
 1. Download `GnosisVPN-Setup-<version>.exe` from the
    [Releases page](https://github.com/SCBuergel/gvpndows/releases). Each release lists SHA-256 sums
    in `SHA256SUMS.txt`.
+
+   Each release has two versions of everything. The normal one sends nothing to anyone. The one
+   with **`DEBUG-logging`** in its file name is the same app, but its service also sends its log
+   (encrypted to the developer's key, at most 240 messages per PC) to the developer, to help find
+   problems; it never sends your node's keys. Take the normal one unless you want to help debug.
+   Installing one replaces the other and keeps your node.
 2. Run it and allow the administrator prompt. Because the file is not signed, Windows SmartScreen may
    say "Windows protected your PC": choose **More info**, then **Run anyway**.
 3. At the end, leave "Start Gnosis VPN" ticked. Later, start it from the Start menu (**Gnosis VPN**).
@@ -97,7 +103,8 @@ logs in `C:\ProgramData`.
   the service's log (which also holds the HOPR node's log). Without approval the zip has only the
   app's part. The node's keys are never included, but the logs show your VPN address and
   connection details: share them only with someone you trust.
-- **Debug builds** have a **Send log to developer** button; release builds have none (see
+- The **DEBUG-logging** version sends the service's log to the developer by itself and has a
+  **Send log to developer** button; the normal version has none (see
   [Release and debug builds](#release-and-debug-builds)).
 
 ---
@@ -145,7 +152,7 @@ to `%ProgramFiles%\Gnosis VPN`, starts the service and waits until it answers on
 
 | Path | What it is |
 | --- | --- |
-| `src/` | The service (`gvpndows.exe`): `service.rs` pipe and service, `gnosis/` core integration, `win/` Wintun, routes, WFP, `pure.rs` platform-independent logic |
+| `src/` | The service (`gvpndows.exe`, no window of its own): `service.rs` pipe and service, `gnosis/` core integration, `win/` Wintun, routes, WFP, `pure.rs` platform-independent logic |
 | `rust/patches/`, `rust/crate-patches/` | Patches that make gnosis_vpn-client and one third-party crate build for Windows |
 | `rust/Cargo.lock` | The lock file of the whole build workspace (client + this crate) |
 | `rust/pure-tests/` | Linux unit tests for `src/pure.rs` and checks on other files |
@@ -154,7 +161,7 @@ to `%ProgramFiles%\Gnosis VPN`, starts the service and waits until it answers on
 | `.github/workflows/windows-installer.yml` | Builds the installer and the zip |
 | `scripts/do-build/` | Alternative build of the service on a rented Linux machine (cross-compiled) |
 | `scripts/aws/` | Tests on a rented Windows Server |
-| `scripts/*.py` | Developer tools for debug builds (relay reader, backup decryption) |
+| `scripts/*.py` | Developer tools for the DEBUG-logging and test builds (relay reader, backup decryption) |
 
 ## Build
 
@@ -174,16 +181,16 @@ payment proving keys in `curvy-zk/`). They come from the official Linux package
 
 ### On GitHub Actions (the normal way)
 
-Every push to `main` or a `ci/**` branch, and every pull request, runs
+Every push to `main` (and to a `ci/**` branch, and every pull request) runs
 `.github/workflows/windows-installer.yml`. It takes about 30 minutes, most of it compiling the
 core:
 
 | Job | Runner | Produces |
 | --- | --- | --- |
 | `data` | Ubuntu | the core's data files; runs `rust/pure-tests`, `bash -n` on the shell scripts and the Python tests |
-| `service` | Windows | `gvpndows.exe`; its `--selftest` must pass |
-| `app` | Windows | the WinUI app; its `--selftest` must pass |
-| `package` | Windows | `GnosisVPN-Setup-<version>.exe`, `GnosisVPN-windows-<version>.zip`, `SHA256SUMS.txt`; checks the package's contents, then installs it silently on the runner, checks that the service runs, and uninstalls it |
+| `service` (twice) | Windows | `gvpndows.exe` as a release build and as a DEBUG-logging build; each `--selftest` must pass (the DEBUG-logging one must reach its relay) |
+| `app` | Windows | the WinUI app (the same for both); its `--selftest` must pass |
+| `package` | Windows | `GnosisVPN-Setup-<version>.exe`, `GnosisVPN-windows-<version>.zip`, the same two with `-DEBUG-logging` before the extension, and `SHA256SUMS.txt`; checks the packages' contents (the relay only in the DEBUG-logging service, the identity backup in neither), then installs each silently on the runner, checks that the service runs, and uninstalls it |
 
 The results are the run's `GnosisVPN-windows` artifact. Pushing a tag `v<version>` also publishes
 them as a GitHub release (a pre-release when the tag contains a `-`, for example `v0.2.3-rc1`). The
@@ -192,16 +199,22 @@ and the `gvpndows` entry in `rust/Cargo.lock` the same.
 
 ### Release and debug builds
 
-Debug builds include a **developer relay** (Cargo feature `debug-relay`): the service streams its
-log, compressed and encrypted to the developer's key, to a private ntfy.sh topic (at most 240
-messages per client), and sends an encrypted backup of the node identity once. This exists for
-testing on machines the developer cannot reach and must not ship to users.
+The service can contain a **developer relay** (Cargo features, both off by default):
 
-- GitHub Actions builds **release builds only**. A debug build carries the relay topic as plain
-  text inside the .exe, and anything built there can end up in a public artifact or release, so
-  debug builds are made only on the rented build machine (below) and handed out privately.
-- A release build sets `GVPNDOWS_RELEASE=1`; with it, a build that still has the `debug-relay`
-  feature fails to compile.
+| Build | Features | Sends | Built by |
+| --- | --- | --- | --- |
+| release | none, `GVPNDOWS_RELEASE=1` | nothing | GitHub Actions; published |
+| DEBUG-logging | `debug-relay` | its log, compressed and sealed to the developer's X25519 key, to an ntfy.sh topic (at most 240 messages per PC) | GitHub Actions; published next to the release build, `DEBUG-logging` in every file name, in the Apps list entry and on the installer's first page |
+| private test build | `debug-identity-backup` (includes `debug-relay`) | the log, and once an encrypted backup of the node identity (the wallet key) | only the rented build machine (below); handed out privately, never published |
+
+- The DEBUG-logging builds' topic and the developer's public key are in the workflow
+  (`DEBUG_NTFY_TOPIC`, `DEBUG_LOG_PUBKEY`): they are inside every DEBUG-logging `.exe` anyway, so
+  they are public on purpose. Anyone could post to that topic; `scripts/relay-read.py --public`
+  decrypts what belongs and marks the rest. The private test builds use another topic, which stays
+  in `~/.config/gvpndows-secrets`.
+- A release build sets `GVPNDOWS_RELEASE=1`; with it, a build that has either feature fails to
+  compile. The workflow never reads repository secrets and never builds `debug-identity-backup`
+  (`scripts/test_build_consistency.py` checks both).
 - Check a release build: the service's `x_state` reply has `"debug_relay": false`, its log has no
   "DEBUG BUILD" line, and the app shows no "Send log to developer" button.
 
@@ -216,8 +229,8 @@ Everything that belongs to the relay is marked `DEBUG FEATURE ONLY`: `src/relay.
 `scripts/do-build/run.sh` builds the service on a temporary DigitalOcean droplet with cargo-xwin
 (cross-compiling to Windows), runs the unit tests and a Wine smoke test, copies `gvpndows.exe` to
 `out/`, and deletes the droplet; a deletion deadline also deletes it if the script dies. It needs a
-DigitalOcean token in `~/do-api-token` (or `DO_TOKEN_FILE`). It makes a debug build unless
-`RELEASE=1` is set; the debug build takes the relay topic from
+DigitalOcean token in `~/do-api-token` (or `DO_TOKEN_FILE`). It makes a private test build
+(`debug-identity-backup`) unless `RELEASE=1` is set; the test build takes the relay topic from
 `~/.config/gvpndows-secrets/ntfy-topic` and the public backup key from
 `~/.config/gvpndows-secrets/backup-x25519.pub` (without them it has no relay). Only files git tracks are uploaded. `KEEP=1` keeps the droplet for `rebuild.sh` until `down.sh`. The app has no equivalent: it builds
 on Windows only (GitHub Actions or `scripts/aws/winui-build.sh`).
@@ -231,8 +244,9 @@ These run on Linux in seconds and need no Windows:
     for t in $(git ls-files 'scripts/*test_*.py'); do python3 -I "$t"; done   # needs python3-cryptography
 
 `scripts/test_build_consistency.py` among them checks that the two build paths use the same client
-commit and Wintun archive, that the three version numbers match, that CI cannot build a debug
-build, and that the installer and the zip run the same install scripts.
+commit and Wintun archive, that the three version numbers match, that CI builds only the release
+and DEBUG-logging flavours (never the identity backup), and that the installer and the zip run the
+same install scripts.
 
 Everything Windows-specific (the tunnel, routes, the DNS filter, the service, the installer) can
 only be tested on Windows. `scripts/aws/` rents a Windows Server 2025 machine on AWS for that and

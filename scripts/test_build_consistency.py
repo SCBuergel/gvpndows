@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The two build paths (GitHub Actions, the droplet scripts) and the version numbers stay in step,
-the installer runs the same scripts as the zip, and CI never builds or publishes a debug build.
+the installer runs the same scripts as the zip, and CI builds exactly two flavours: release, and
+DEBUG-logging (log relay only, never the identity backup), with "DEBUG-logging" in its file names.
 Run: python3 -I THIS_FILE"""
 import os, re
 
@@ -30,10 +31,22 @@ cargo = re.search(r'^version = "([^"]+)"', read("Cargo.toml"), re.M).group(1)
 lock = re.search(r'name = "gvpndows"\nversion = "([^"]+)"', read("rust/Cargo.lock")).group(1)
 assert csproj == cargo == lock, f"versions differ: csproj {csproj}, Cargo.toml {cargo}, rust/Cargo.lock {lock}"
 
-# CI builds release builds only: no secrets, no relay feature, GVPNDOWS_RELEASE set
-assert "secrets." not in wf, "the workflow must not read secrets (a debug build would publish the relay topic)"
-assert "--features" not in wf, "CI must not enable features (debug-relay)"
-assert "GVPNDOWS_RELEASE=1" in wf
+# CI: no secrets (everything built there may be public); the release flavour sets GVPNDOWS_RELEASE=1;
+# the only feature it enables is debug-relay (logs), never debug-identity-backup (the wallet key)
+assert "secrets." not in wf, "the workflow must not read secrets (its builds may become public)"
+assert "debug-identity-backup" not in wf, "CI must never build the identity backup"
+assert re.findall(r"--features [\w-]+", wf) == ["--features debug-relay"], "CI enables a feature other than debug-relay"
+assert re.search(r'if \[ "\$FLAVOUR" = release \]; then\n\s*export GVPNDOWS_RELEASE=1; features=""', wf), "the release flavour is not built with GVPNDOWS_RELEASE=1"
+assert "flavour: [release, debug-logging]" in wf
+# DEBUG-logging: visible in every file name, the Apps list and the installer's first page
+for name in ("GnosisVPN-Setup-$env:VERSION$sfx.exe", "GnosisVPN-windows-$env:VERSION-DEBUG-logging.zip"):
+    assert name in wf, name + " not built"
+assert '#define Suffix "-DEBUG-logging"' in iss and "OutputBaseFilename=GnosisVPN-Setup-{#AppVersion}{#Suffix}" in iss
+assert re.search(r'#define Shown "Gnosis VPN \(DEBUG-logging[^"]*"', iss) and "UninstallDisplayName={#Shown}" in iss
+dbg, disc = read("dist/windows/DEBUG-logging.txt"), read("dist/windows/DISCLAIMER.txt")
+assert read("dist/windows/DISCLAIMER-DEBUG-logging.txt") == dbg + disc, "DISCLAIMER-DEBUG-logging.txt is not DEBUG-logging.txt + DISCLAIMER.txt"
+# the droplet's private test builds are the only ones with the identity backup
+assert "--features debug-identity-backup" in build
 # the patched crates are hash-checked
 assert re.search(r'echo "\$sum  \$cv\.crate" \| sha256sum -c\n\s*tar -xzf "\$cv\.crate"', wf), "patched crates are not hash-checked before unpacking"
 
@@ -57,6 +70,6 @@ for key, files in (("SetupIconFile", ["../../winui/GnosisVpn/Assets/app.ico"]),
 assert "<ApplicationIcon>Assets\\app.ico</ApplicationIcon>" in read("winui/GnosisVpn/GnosisVpn.csproj"), "the .exe has no app icon"
 for st in ("off", "ok", "warn", "bad"): assert os.path.isfile(os.path.join(root, "winui/GnosisVpn/Assets", f"tray-{st}.ico"))
 # the prototype disclaimer: shown by the installer before installing, in the README and the zip
-assert re.search(r"^InfoBeforeFile=DISCLAIMER\.txt$", iss, re.M) and os.path.isfile(os.path.join(root, "dist/windows/DISCLAIMER.txt")), "installer does not show the disclaimer"
+assert re.search(r"^InfoBeforeFile=\{#Notice\}$", iss, re.M) and '#define Notice "DISCLAIMER.txt"' in iss and '#define Notice "DISCLAIMER-DEBUG-logging.txt"' in iss, "installer does not show the disclaimer"
 assert "Prototype, for testing only" in read("README.md") and "prototype" in read("dist/windows/README.txt").splitlines()[0], "README or the zip readme lost the disclaimer"
 print("build consistency ok")

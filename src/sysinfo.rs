@@ -113,13 +113,13 @@ fn is_wine() -> bool {
     }
 }
 
-/// Shows a blocking error box (used when the window itself cannot start).
-pub fn fatal_box(text: &str) {
+/// Shows a blocking message box (the service started without a mode, for example double-clicked).
+pub fn info_box(text: &str) {
     #[cfg(windows)]
     unsafe {
-        use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
-        let (t, c) = (wide(text), wide("gvpndows"));
-        MessageBoxW(std::ptr::null_mut(), t.as_ptr(), c.as_ptr(), MB_OK | MB_ICONERROR);
+        use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONINFORMATION, MB_OK};
+        let (t, c) = (wide(text), wide("Gnosis VPN service"));
+        MessageBoxW(std::ptr::null_mut(), t.as_ptr(), c.as_ptr(), MB_OK | MB_ICONINFORMATION);
     }
     #[cfg(not(windows))]
     eprintln!("{text}");

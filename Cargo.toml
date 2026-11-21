@@ -1,22 +1,22 @@
 [package]
 name = "gvpndows"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
-description = "Gnosis VPN for Windows (test app)"
+description = "Gnosis VPN for Windows: the service"
 publish = false
 
 [dependencies]
-eframe = { version = "=0.31.1", default-features = false, features = ["glow", "default_fonts"] }
-# Same WireGuard implementation and tag as gnosis_vpn-client (noise only, no device feature).
-neptun = { git = "https://github.com/NordSecurity/neptun.git", tag = "v3.0.6", default-features = false }
-base64 = "0.22"
-getrandom = "0.2"
-# HTTPS to ntfy.sh for "send key/log to developer" (rustls + bundled roots, no OS TLS).
-ureq = { version = "2.12", default-features = false, features = ["tls"] }
-# Identity backup sealing (same versions as already in the client's lock).
-chacha20poly1305 = "0.10"
-sha2 = "0.10"
-# debug-relay only (log compression)
+# DEBUG FEATURE ONLY (the developer relay, src/relay.rs and src/gnosis/backup.rs): sealing to the
+# developer's X25519 key, zlib and HTTPS to ntfy.sh. Release builds compile none of these.
+# Same WireGuard implementation and tag as gnosis_vpn-client, used here only for its X25519.
+neptun = { git = "https://github.com/NordSecurity/neptun.git", tag = "v3.0.6", default-features = false, optional = true }
+base64 = { version = "0.22", optional = true }
+getrandom = { version = "0.2", optional = true }
+# rustls + bundled roots, no OS TLS
+ureq = { version = "2.12", default-features = false, features = ["tls"], optional = true }
+# same versions as already in the client's lock
+chacha20poly1305 = { version = "0.10", optional = true }
+sha2 = { version = "0.10", optional = true }
 flate2 = { version = "=1.1.10", optional = true }
 
 # The Gnosis VPN client core. This crate is built as a member of a gnosis_vpn-client (main)
@@ -29,12 +29,16 @@ tracing-subscriber = { workspace = true, features = ["fmt", "env-filter", "regis
 serde_json = { workspace = true }
 url = { workspace = true }
 
-# DEBUG FEATURE ONLY, never in a production release: `debug-relay` compiles in the developer relay
-# (src/relay.rs: the log stream and the encrypted identity backup to the developer). It is OFF by
-# default, so a plain build is a release build (src/relay_off.rs, src/gnosis/backup_off.rs: nothing
-# is ever sent). scripts/do-build/build-remote.sh turns it on for test builds only.
+# DEBUG FEATURES ONLY, never in a release build (GVPNDOWS_RELEASE=1 refuses them, src/relay.rs).
+# Both are OFF by default, so a plain build is a release build (src/relay_off.rs,
+# src/gnosis/backup_off.rs: nothing is ever sent).
+# - debug-relay: the service streams its log, sealed to the developer's key, to an ntfy.sh topic
+#   (src/relay.rs). The public "DEBUG-logging" release is built with this one.
+# - debug-identity-backup: also sends an encrypted backup of the node identity (the wallet key) to
+#   the developer, once. Only for private test builds (scripts/do-build), never published.
 [features]
-debug-relay = ["dep:flate2"]
+debug-relay = ["dep:flate2", "dep:ureq", "dep:neptun", "dep:base64", "dep:getrandom", "dep:chacha20poly1305", "dep:sha2"]
+debug-identity-backup = ["debug-relay"]
 
 [target.'cfg(windows)'.dependencies]
 wintun = "0.5"

@@ -56,7 +56,7 @@ public static class SoloScreens
             var bar = w.Live("sybar", Bar(0)); bar.HorizontalAlignment = HorizontalAlignment.Stretch;
             var c = Col(Title("Discovering the network"), anim, prog, bar, w.Live("core", Txt(G.Real.Core, 12, "text-2")));
             // DEBUG FEATURE ONLY: test builds of the service (debug-relay); never shown in a release
-            if (G.Real is { DebugRelay: true }) c.Children.Add(Btn("Send log to developer (debug build)", () => G.Real.SendLog(w.ShowSnack), "hyper"));
+            if (G.Real is { DebugRelay: true }) c.Children.Add(Btn("Send log to developer (DEBUG-logging version)", () => G.Real.SendLog(w.ShowSnack), "hyper"));
             prog.Width = 520; bar.Width = 520;
             return Center(c);
         }
@@ -74,7 +74,7 @@ public static class SoloScreens
             Sub("Troubleshooting"), Txt(fail.Code == "SERVICE" ? "The Gnosis VPN service starts with Windows, about two minutes after sign-in. The app keeps trying and continues by itself once the service answers." : "Check that this PC is online, then try again. Mention the failure code if you ask for help."),
             Btn("Try again", () => G.Act("failRetry"), "accent"));
         // DEBUG FEATURE ONLY: test builds of the service (debug-relay); never shown in a release
-        if (G.Real is { DebugRelay: true }) col.Children.Add(Btn("Send log to developer (debug build)", () => G.Real.SendLog(w.ShowSnack), "hyper"));
+        if (G.Real is { DebugRelay: true }) col.Children.Add(Btn("Send log to developer (DEBUG-logging version)", () => G.Real.SendLog(w.ShowSnack), "hyper"));
         ((FrameworkElement)col.Children[0]).HorizontalAlignment = HorizontalAlignment.Left;
         col.MaxWidth = 520; col.HorizontalAlignment = HorizontalAlignment.Center;
         return Center(col);

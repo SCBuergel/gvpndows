@@ -34,7 +34,7 @@ public sealed class Pages
         void A(object? o) => sb.Append(o).Append(';');
         A(S.Conn); A(S.Loc); A(S.Mode); A(Mb(S.Balance)); A(S.Simple); A(S.Details); A(S.Icons);
         A(S.Q); A(S.Ptab); A(S.Pall); A(w.U.MoreMsgs); A(w.U.Mode); A(w.U.KeepTray); A(w.U.StartWin); A(w.U.StartMin); A(exporting);
-        A(R.NodeAddress); A(R.NeedWx); A(R.NeedXdai); A(R.HaveWx); A(R.HaveXdai);
+        A(R.NodeAddress); A(R.NeedWx); A(R.NeedXdai); A(R.HaveWx); A(R.HaveXdai); A(R.DebugRelay);
         foreach (var kv in S.Alloc.OrderBy(k => k.Key)) A(kv.Key + "=" + Math.Round(kv.Value / 10));
         foreach (var e in G.EX) A(e.Id + G.GradeOf(e).K + G.GradeOf(e).N + e.Ping / 50);
         foreach (var r in S.Recent) A(r.Id);
@@ -499,7 +499,7 @@ public sealed class Pages
             "Saves one zip to your Downloads folder with the app's and the service's logs, the HOPR node's included (asks for administrator approval for the service's part). It contains your VPN address and connection details, not your node's keys.",
             Btn(exporting ? "Exporting…" : "Export", ExportLogs, disabled: exporting))));
         p.Children.Add(Section("About"));
-        p.Children.Add(Grp(Card("vpn_key", "Gnosis VPN", $"App {Version()} · prototype", null),
+        p.Children.Add(Grp(Card("vpn_key", "Gnosis VPN", $"App {Version()} · prototype" + (R.DebugRelay ? " · DEBUG-logging: the service sends its log to the developer" : ""), null),
             Card("warning", "Prototype, for testing only", "Not a finished or supported product, and not security-audited. There is no kill switch, so it may expose your traffic; it spends real funds on Gnosis Chain. Use small amounts, and do not rely on it to protect your identity or your data. No warranty (GNU GPL v3.0).", null)));
         return p;
     }

@@ -7,7 +7,7 @@ how the pieces fit (app, pipe, service, core); this file adds what you need to c
 
 - **No Windows build on a developer machine unless it is Windows.** The service compiles a whole
   HOPR node (thousands of crates, many GB of RAM); the app needs the Windows SDK. Build through
-  GitHub Actions (push a `ci/<topic>` branch) or the rented-machine scripts (`scripts/do-build/`,
+  GitHub Actions (push to `main`) or the rented-machine scripts (`scripts/do-build/`,
   `scripts/aws/`). Rented machines cost money: every script there deletes its machine on exit and
   arms a deadline that deletes it if the script dies; keep it that way in any new script.
 - **Secrets never enter the repository, a log, a commit message or CI output:** node identities
@@ -17,11 +17,13 @@ how the pieces fit (app, pipe, service, core); this file adds what you need to c
   not add Windows-only routes that send some traffic outside the tunnel (for example, to make a
   service such as Curvy reachable directly); fix the cause instead.
 - **The debug relay must stay removable.** Anything that sends data to the developer belongs to the
-  `debug-relay` feature, is marked `DEBUG FEATURE ONLY`, and has a no-op twin for release builds
-  (`src/relay_off.rs`, `src/gnosis/backup_off.rs`). `GVPNDOWS_RELEASE=1` must keep failing to
-  compile a build that has the feature (`src/relay.rs`). GitHub Actions never builds a debug
-  build and never reads repository secrets: its artifacts and releases are public, and a debug
-  .exe contains the relay topic as plain text.
+  `debug-relay` feature (logs) or `debug-identity-backup` (the wallet key), is marked
+  `DEBUG FEATURE ONLY`, and has a no-op twin for release builds (`src/relay_off.rs`,
+  `src/gnosis/backup_off.rs`). `GVPNDOWS_RELEASE=1` must keep failing to compile a build that has
+  either feature (`src/relay.rs`). GitHub Actions builds two flavours, release and DEBUG-logging
+  (`debug-relay` only, "DEBUG-logging" in every file name), never reads repository secrets and
+  never builds `debug-identity-backup`: its artifacts and releases are public. The identity backup
+  exists only in private test builds from `scripts/do-build/`.
 
 ## Tests to run before every commit
 
@@ -95,10 +97,12 @@ routes, DNS, the pipe or installation.
 ## Releases
 
 Bump `<Version>` in `winui/GnosisVpn/GnosisVpn.csproj`, `version` in `Cargo.toml` and the
-`gvpndows` entry in `rust/Cargo.lock` together (the consistency test checks it), then push a tag `v<version>`. The workflow
-publishes the installer, the zip and `SHA256SUMS.txt` as a GitHub release.
+`gvpndows` entry in `rust/Cargo.lock` together (the consistency test checks it), then push a tag
+`v<version>`. The workflow publishes both installers and both zips (release and DEBUG-logging) and
+`SHA256SUMS.txt` as a GitHub release.
 
 ## Commits
 
-One topic per commit; the message says what changed and why. Do not push to `main` without the
-owner's go-ahead; work on a branch.
+One topic per commit; the message says what changed and why. The owner is the only developer:
+work on `main` directly (no feature branches) and push when the owner asks. Each push to `main`
+builds both flavours on GitHub Actions.

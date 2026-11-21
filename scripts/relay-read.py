@@ -61,8 +61,11 @@ def render(priv, lines):
 def main():
     from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
     S = os.path.expanduser("~/.config/gvpndows-secrets")
-    topic = open(f"{S}/ntfy-topic").read().strip()
-    since = sys.argv[1] if len(sys.argv) > 1 else "12h"
+    # --public: the topic of the public DEBUG-logging releases (built by GitHub Actions)
+    public = "--public" in sys.argv
+    args = [a for a in sys.argv[1:] if a != "--public"]
+    topic = open(f"{S}/ntfy-topic-public" if public else f"{S}/ntfy-topic").read().strip()
+    since = args[0] if args else "12h"
     priv = X25519PrivateKey.from_private_bytes(base64.b64decode(open(f"{S}/backup-x25519.key").read()))
     with urllib.request.urlopen(f"https://ntfy.sh/{topic}/json?poll=1&since={since}", timeout=30) as r:
         for block in render(priv, r):

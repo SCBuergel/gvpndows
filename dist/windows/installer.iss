@@ -1,5 +1,7 @@
 ; Gnosis VPN for Windows: one-file installer (Inno Setup 6). Built by .github/workflows/windows-installer.yml:
 ;   iscc /DAppVersion=0.2.2 /DPayload=<folder with Install.cmd, install.ps1, app\, service\> /DOutDir=<dir> installer.iss
+;   /DDebugLogging=1: the DEBUG-logging installer (its service sends its log to the developer);
+;   "DEBUG-logging" is then in the file name, the Apps list entry and the first page.
 ; The installer does not copy the app or the service itself: it unpacks the same folder the zip
 ; package has into a temporary folder and runs install.ps1 from there, so the zip and the installer
 ; install exactly the same way. It keeps uninstall.ps1 for "Apps > Installed apps > Uninstall".
@@ -12,6 +14,15 @@
 #endif
 #ifndef OutDir
   #define OutDir "."
+#endif
+#ifdef DebugLogging
+  #define Suffix "-DEBUG-logging"
+  #define Shown "Gnosis VPN (DEBUG-logging: sends its log to the developer)"
+  #define Notice "DISCLAIMER-DEBUG-logging.txt"
+#else
+  #define Suffix ""
+  #define Shown "Gnosis VPN"
+  #define Notice "DISCLAIMER.txt"
 #endif
 
 [Setup]
@@ -30,18 +41,18 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
 OutputDir={#OutDir}
-OutputBaseFilename=GnosisVPN-Setup-{#AppVersion}
+OutputBaseFilename=GnosisVPN-Setup-{#AppVersion}{#Suffix}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
-UninstallDisplayName=Gnosis VPN
+UninstallDisplayName={#Shown}
 UninstallDisplayIcon={commonpf64}\Gnosis VPN\GnosisVPN.exe
 ; The app's icon everywhere (winui/tools/gen_icons.py derives the images from it)
 SetupIconFile=..\..\winui\GnosisVpn\Assets\app.ico
 WizardImageFile=wizard-164.bmp,wizard-328.bmp
 WizardSmallImageFile=wizard-small-55.bmp,wizard-small-110.bmp
 ; shown before installing (skipped by /SILENT and /VERYSILENT)
-InfoBeforeFile=DISCLAIMER.txt
+InfoBeforeFile={#Notice}
 CloseApplications=no
 SetupLogging=yes
 
