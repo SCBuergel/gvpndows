@@ -86,12 +86,14 @@ routes, DNS, the pipe or installation.
 
 ## Updating the client core
 
-**Current state (experiment):** `CLIENT_REF` is upstream gnosis/gnosis_vpn-client main `e6b33f36`
-without the side-car, built to compare against the 0.2.4 test build (this repository's `12f56a6`:
-`CLIENT_REPO` SCBuergel/gnosis_vpn-client, branch `sidecar-relayer-hold` c768ccf1, drafts
-gnosis/gnosis_vpn-client#1076 and hoprnet/edge-client#276). Both carry
-`rust/patches/0002-hopr-strategy-inclusion-retry.patch` (hopr-strategy from SCBuergel/hopr-strategy
-`d6ad33ff`, which retries the note lookup after a relayed deposit); drop it once that fix is released.
+**Current state (experiment 2):** `CLIENT_REPO` is SCBuergel/gnosis_vpn-client, branch
+`sidecar-relayer-hold-on-8a0e3be`: the side-car + hold commits of draft gnosis/gnosis_vpn-client#1076
+cherry-picked onto client `8a0e3be` (0.2.3's client, hoprnet master `ff0076ef`), with edgli from
+SCBuergel/edge-client `sidecar-relayer-on-7bafb47` (draft hoprnet/edge-client#276 on edge-client
+`7bafb47`). Earlier builds for comparison: `12f56a6` (0.2.4: side-car on client main `e6b33f36`) and
+`25a644c` (experiment 1: plain `e6b33f36`). `rust/patches/0002-hopr-strategy-inclusion-retry.patch`
+adds hopr-strategy from SCBuergel/hopr-strategy `d6ad33ff` (retries the note lookup after a relayed
+deposit); drop it once that fix is released.
 
 1. Set the new commit as `CLIENT_REF` (and its repository as `CLIENT_REPO`) in `.github/workflows/windows-installer.yml` and
    `scripts/do-build/build-remote.sh` (and its mention in `setup-remote.sh`).

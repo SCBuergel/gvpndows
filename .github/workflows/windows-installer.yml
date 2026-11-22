@@ -30,10 +30,10 @@ concurrency:
 
 env:
   # gnosis_vpn-client commit the core is built from (main at 1.1.1), as in scripts/do-build/build-remote.sh
-  # the client: experiment build, upstream main e6b33f36 (#1070 hoprnet probing pin) without the
-  # side-car, to compare with 0.2.4 (side-car + hold, SCBuergel sidecar-relayer-hold c768ccf1)
-  CLIENT_REPO: https://github.com/gnosis/gnosis_vpn-client.git
-  CLIENT_REF: e6b33f36c90953855911b01d17c494fcd94078b4
+  # the client: experiment 2, the side-car + hold commits cherry-picked onto client 8a0e3be (0.2.3's,
+  # hoprnet master ff0076ef): SCBuergel/gnosis_vpn-client sidecar-relayer-hold-on-8a0e3be
+  CLIENT_REPO: https://github.com/SCBuergel/gnosis_vpn-client.git
+  CLIENT_REF: 98de03843e214d895a85bc4c62a56433dffc359f
   # the core's data files (prod network config, geoip.mmdb, PIX proving files) come from this package
   DEB_URL: https://download.gnosisvpn.io/linux/apt/pool/main/g/gnosisvpn/gnosisvpn_1.0.0_amd64.deb
   DEB_SHA256: 8ba5a522b877f20f1a5e14ac8d5e3657fcec906d73536e6267a0f073753371e8

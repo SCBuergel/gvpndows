@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs ON the droplet. Builds inside a gnosis_vpn-client checkout (CLIENT_REPO at CLIENT_REF, default: upstream main e6b33f36 (experiment)) (/root/client) with our
+# Runs ON the droplet. Builds inside a gnosis_vpn-client checkout (CLIENT_REPO at CLIENT_REF, default: side-car on client 8a0e3be (experiment 2)) (/root/client) with our
 # Windows patch applied and this app added as the workspace member gnosis_vpn-windows, so the app
 # links the client core against the client's own pinned Cargo.lock.
 # MODE=check      only `cargo check` the app (and with it the patched core) for Windows: fast errors
@@ -16,8 +16,8 @@ export AWS_LC_SYS_PREBUILT_NASM=1
 
 # --- workspace: pristine client + patch + our crate ---
 cd /root/client
-CLIENT_REPO=${CLIENT_REPO:-https://github.com/gnosis/gnosis_vpn-client.git}
-CLIENT_REF=${CLIENT_REF:-e6b33f36c90953855911b01d17c494fcd94078b4}
+CLIENT_REPO=${CLIENT_REPO:-https://github.com/SCBuergel/gnosis_vpn-client.git}
+CLIENT_REF=${CLIENT_REF:-98de03843e214d895a85bc4c62a56433dffc359f}
 git cat-file -e "$CLIENT_REF^{commit}" 2>/dev/null || git fetch -q "$CLIENT_REPO" "$CLIENT_REF"
 git checkout -q -f "$CLIENT_REF" && git clean -qfdx -e target && echo "client $(git log --oneline -1)"
 for p in /root/src/rust/patches/*.patch; do git apply "$p"; echo "applied $(basename "$p")"; done
