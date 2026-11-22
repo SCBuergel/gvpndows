@@ -168,8 +168,8 @@ to `%ProgramFiles%\Gnosis VPN`, starts the service and waits until it answers on
 The service is not a standalone crate: it builds as a member of a gnosis_vpn-client checkout, so
 that it links the client core with the client's own dependency versions. A build:
 
-1. checks out gnosis_vpn-client at the commit in `CLIENT_REF` (in the workflow and in
-   `scripts/do-build/build-remote.sh`) and applies `rust/patches/*.patch`;
+1. checks out gnosis_vpn-client (`CLIENT_REPO`) at the commit in `CLIENT_REF` (both in the workflow
+   and in `scripts/do-build/build-remote.sh`) and applies `rust/patches/*.patch`;
 2. fetches each crate named in `rust/crate-patches/` and patches it in through `[patch.crates-io]`;
 3. copies this repository's `Cargo.toml`, `build.rs`, `src/`, `.cargo/config.toml` and
    `rust/Cargo.lock` in as `gnosis_vpn-windows/`, and Wintun 0.14.1 (hash-checked) next to it;

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs ON the droplet. Builds inside a gnosis_vpn-client checkout (CLIENT_REF, default: main at 8a0e3be6, version 1.1.1) (/root/client) with our
+# Runs ON the droplet. Builds inside a gnosis_vpn-client checkout (CLIENT_REPO at CLIENT_REF, default: the side-car test branch at c768ccf1) (/root/client) with our
 # Windows patch applied and this app added as the workspace member gnosis_vpn-windows, so the app
 # links the client core against the client's own pinned Cargo.lock.
 # MODE=check      only `cargo check` the app (and with it the patched core) for Windows: fast errors
@@ -16,8 +16,9 @@ export AWS_LC_SYS_PREBUILT_NASM=1
 
 # --- workspace: pristine client + patch + our crate ---
 cd /root/client
-CLIENT_REF=${CLIENT_REF:-8a0e3be6cddedcb21b23f82327ccf99ab40e327c}
-git cat-file -e "$CLIENT_REF^{commit}" 2>/dev/null || git fetch -q origin main
+CLIENT_REPO=${CLIENT_REPO:-https://github.com/SCBuergel/gnosis_vpn-client.git}
+CLIENT_REF=${CLIENT_REF:-c768ccf1b96ed441cb885429ca426de20b2d2734}
+git cat-file -e "$CLIENT_REF^{commit}" 2>/dev/null || git fetch -q "$CLIENT_REPO" "$CLIENT_REF"
 git checkout -q -f "$CLIENT_REF" && git clean -qfdx -e target && echo "client $(git log --oneline -1)"
 for p in /root/src/rust/patches/*.patch; do git apply "$p"; echo "applied $(basename "$p")"; done
 # Third-party crates that need a Windows fix: rust/crate-patches/<crate>-<version>.patch is applied
@@ -29,7 +30,12 @@ for p in /root/src/rust/crate-patches/*.patch; do
     src=$(ls -d /root/.cargo/registry/src/*/"$cv" | head -1)
     rm -rf "patched/$cv"; mkdir -p patched; cp -r "$src" "patched/$cv"
     patch -s -p1 -d "patched/$cv" < "$p"
-    [ $first = 1 ] && printf '\n[patch.crates-io]\n' >> Cargo.toml && first=0
+    if [ $first = 1 ]; then
+        # the client may have a [patch.crates-io] table already; ours go into it, so it must be the last table
+        grep -qx '\[patch.crates-io\]' Cargo.toml || printf '\n[patch.crates-io]\n' >> Cargo.toml
+        [ "$(grep '^\[' Cargo.toml | tail -1)" = '[patch.crates-io]' ] || { echo "[patch.crates-io] is not the last table of the client's Cargo.toml"; exit 1; }
+        first=0
+    fi
     printf '%s = { path = "patched/%s" }\n' "$crate" "$cv" >> Cargo.toml
     echo "patched crate $cv"
 done

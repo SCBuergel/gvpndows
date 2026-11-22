@@ -30,7 +30,10 @@ concurrency:
 
 env:
   # gnosis_vpn-client commit the core is built from (main at 1.1.1), as in scripts/do-build/build-remote.sh
-  CLIENT_REF: 8a0e3be6cddedcb21b23f82327ccf99ab40e327c
+  # the client: SCBuergel/gnosis_vpn-client branch sidecar-relayer-hold (test build: side-car relayer
+  # session + hold until paid, drafts gnosis/gnosis_vpn-client#1076 and hoprnet/edge-client#276)
+  CLIENT_REPO: https://github.com/SCBuergel/gnosis_vpn-client.git
+  CLIENT_REF: c768ccf1b96ed441cb885429ca426de20b2d2734
   # the core's data files (prod network config, geoip.mmdb, PIX proving files) come from this package
   DEB_URL: https://download.gnosisvpn.io/linux/apt/pool/main/g/gnosisvpn/gnosisvpn_1.0.0_amd64.deb
   DEB_SHA256: 8ba5a522b877f20f1a5e14ac8d5e3657fcec906d73536e6267a0f073753371e8
@@ -91,7 +94,7 @@ jobs:
         with: { path: src }
       - name: Workspace (client + Windows patch + this crate)
         run: |
-          git clone -q https://github.com/gnosis/gnosis_vpn-client.git client
+          git clone -q "$CLIENT_REPO" client
           cd client
           git checkout -q "$CLIENT_REF"
           for p in ../src/rust/patches/*.patch; do git apply "$p"; echo "applied $(basename "$p")"; done
@@ -108,7 +111,12 @@ jobs:
             echo "$sum  $cv.crate" | sha256sum -c
             tar -xzf "$cv.crate" -C patched
             patch -s -p1 -d "patched/$cv" < "$p"
-            [ $first = 1 ] && printf '\n[patch.crates-io]\n' >> Cargo.toml && first=0
+            if [ $first = 1 ]; then
+                # the client may have a [patch.crates-io] table already; ours go into it, so it must be the last table
+                grep -qx '\[patch.crates-io\]' Cargo.toml || printf '\n[patch.crates-io]\n' >> Cargo.toml
+                [ "$(grep '^\[' Cargo.toml | tail -1)" = '[patch.crates-io]' ] || { echo "[patch.crates-io] is not the last table of the client's Cargo.toml"; exit 1; }
+                first=0
+            fi
             printf '%s = { path = "patched/%s" }\n' "$crate" "$cv" >> Cargo.toml
             echo "patched crate $cv"
           done

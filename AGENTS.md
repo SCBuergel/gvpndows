@@ -61,7 +61,7 @@ routes, DNS, the pipe or installation.
 | Core lifecycle (start, restart, backoff) | `src/gnosis/mod.rs`, `core_restart` in `src/pure.rs` | Each core run has its own tokio runtime, shut down fully before a restart, so two HOPR nodes never run on one identity |
 | What the app shows | `winui/GnosisVpn/Engine/RealBackend.cs` | Maps the core's status JSON to UI state |
 | Install, update, uninstall | `dist/windows/*.ps1`, `dist/windows/installer.iss` | The installer only runs `install.ps1`; keep both paths identical |
-| Build steps | `.github/workflows/windows-installer.yml`, `scripts/do-build/build-remote.sh` | Keep `CLIENT_REF`, the Wintun archive and the patch steps the same in both (`scripts/test_build_consistency.py` checks the first two) |
+| Build steps | `.github/workflows/windows-installer.yml`, `scripts/do-build/build-remote.sh` | Keep `CLIENT_REPO`, `CLIENT_REF`, the Wintun archive and the patch steps the same in both (`scripts/test_build_consistency.py` checks the first two) |
 
 ## Pitfalls that cost time before
 
@@ -86,7 +86,9 @@ routes, DNS, the pipe or installation.
 
 ## Updating the client core
 
-1. Set the new commit as `CLIENT_REF` in `.github/workflows/windows-installer.yml` and
+The client currently comes from a fork with draft PRs (README, "Updating the client core").
+
+1. Set the new commit as `CLIENT_REF` (and its repository as `CLIENT_REPO`) in `.github/workflows/windows-installer.yml` and
    `scripts/do-build/build-remote.sh` (and its mention in `setup-remote.sh`).
 2. Rebase `rust/patches/0001-windows-target.patch` onto it; check whether each crate patch in
    `rust/crate-patches/` is still needed.

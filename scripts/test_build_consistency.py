@@ -18,6 +18,10 @@ uninstall = read("dist/windows/uninstall.ps1")
 ref = re.search(r"^  CLIENT_REF: ([0-9a-f]{40})$", wf, re.M).group(1)
 assert re.search(r"CLIENT_REF=\$\{CLIENT_REF:-" + ref + r"\}", build), "build-remote.sh CLIENT_REF differs from the workflow"
 assert re.search(r"\$\{CLIENT_REF:-" + ref + r"\}", setup), "setup-remote.sh CLIENT_REF differs from the workflow"
+repo = re.search(r"^  CLIENT_REPO: (\S+)$", wf, re.M).group(1)
+assert "CLIENT_REPO=${CLIENT_REPO:-" + repo + "}" in build, "build-remote.sh CLIENT_REPO differs from the workflow"
+assert "${CLIENT_REPO:-" + repo + "}" in setup, "setup-remote.sh CLIENT_REPO differs from the workflow"
+assert 'git clone -q "$CLIENT_REPO" client' in wf, "the workflow does not clone CLIENT_REPO"
 
 # same Wintun archive
 wsum = re.search(r"^  WINTUN_SHA256: ([0-9a-f]{64})$", wf, re.M).group(1)

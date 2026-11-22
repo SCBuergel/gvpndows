@@ -1,0 +1,13 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index d9ce7227..5d599418 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -94,6 +94,6 @@ opt-level     = 3
+ panic         = "abort"
+ strip         = true
+ 
+-# CORE-1411 refill retry until hopr-strategy 9.2.1 is published
++# CORE-1411 refill retry, plus the Curvy inclusion-note retry (fork, fix/curvy-inclusion-note-race), until hopr-strategy 9.2.1 is published
+ [patch.crates-io]
+-hopr-strategy = { git = "https://github.com/hoprnet/hopr-strategy", rev = "97bfc19a74235c814b322d355c2429100fac7174" }
++hopr-strategy = { git = "https://github.com/SCBuergel/hopr-strategy", rev = "d6ad33ff62dcbf83155864a4e882e0784aca2d73" }
