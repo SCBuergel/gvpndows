@@ -4630,7 +4630,7 @@ dependencies = [
 
 [[package]]
 name = "gvpndows"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305 0.10.1",
