@@ -66,8 +66,8 @@ public sealed class AppEngine
         if (e == null || e.Routable == false) return new Grade("hidden", 0, "Unavailable");
         if (!e.Measured) return new Grade("unmeasured", 0, "Not measured yet", null, -0.5);
         if (e.Pv < MIN_PATH_VALUE) return new Grade("weak", 1, "Weak route", "bad", -1 + e.Pv);
-        // the client defines one threshold (WEAK_ROUTE_VALUE 0.9): above it a route is good; the
-        // value itself still orders the list
+        // Pv is the exit's path as a share of the best exit's (the core's percent_of_best / 100):
+        // below 90 % of the best a route counts as weak; the value itself still orders the list
         return new Grade("ok", 4, "Good", "ok", e.Pv);
     }
     public Exit? Best(string? except = null) =>

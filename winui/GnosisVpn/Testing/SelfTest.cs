@@ -18,8 +18,8 @@ public static class SelfTest
     static void Check(bool ok, string what) { checks++; if (!ok) fails.Add(what); }
 
     const string DESTS = """
-        [{"destination":{"id":"gvpn-ger-1-j9os","meta":{"name":"GVPN-GER-1","description":null,"other":{}},"geo":{"country":"DE"}},"route_health":{"state":{"type":"routable"},"walk":{"type":"paths","walked_at":1,"count":3,"distinct_first_relays":2,"best_relays":[],"best_value":0.995,"return_count":3,"return_best_relays":[],"return_best_value":0.99},"quick_probe":{"type":"checked","checked_at":1,"versions":{"api":[]},"api_version":null,"load":{},"status_rtt":412}}},
-         {"destination":{"id":"gvpn-lt-1-ynm1","meta":{"name":"GVPN-LT-1","description":"Exit node","other":{}},"geo":{"country":"LT"}},"route_health":{"state":{"type":"routable"},"walk":{"type":"paths","walked_at":1,"count":1,"distinct_first_relays":1,"best_relays":[],"best_value":0.85,"return_count":1,"return_best_relays":[],"return_best_value":0.8}}},
+        [{"destination":{"id":"gvpn-ger-1-j9os","meta":{"name":"GVPN-GER-1","description":null,"other":{}},"geo":{"country":"DE"}},"route_health":{"state":{"type":"routable"},"walked_at":1,"percent_of_best":100,"quick_probe":{"type":"checked","checked_at":1,"versions":{"api":[]},"api_version":null,"load":{},"status_rtt":412}}},
+         {"destination":{"id":"gvpn-lt-1-ynm1","meta":{"name":"GVPN-LT-1","description":"Exit node","other":{}},"geo":{"country":"LT"}},"route_health":{"state":{"type":"routable"},"walked_at":1,"percent_of_best":85}},
          {"destination":{"id":"gvpn-kenya-1-tzm3","meta":{"name":"GVPN-KENYA-1","other":{}},"geo":{"country":"KE"}},"route_health":{"state":{"type":"not_routable"}}}]
         """;
     static JsonNode State(string runMode, string conn = "{\"type\":\"disconnected\"}") => JsonNode.Parse(
@@ -57,8 +57,8 @@ public static class SelfTest
         Check(g.S.Fail == null, "a reply clears the failure page");
         Check(g.EX.Count == 3 && g.EX[0].Country == "Germany" && g.EX[1].City == "GVPN-LT-1", "destinations become exits");
         Check(g.GradeOf(g.EX[2]).K == "hidden", "a not-routable exit is not offered");
-        Check(g.GradeOf(g.EX[0]).Label == "Good" && g.EX[0].Ping == 412, "route grade from the walk's path value, latency from the probe");
-        Check(g.GradeOf(g.EX[1]).K == "weak", "a low path value is a weak route");
+        Check(g.GradeOf(g.EX[0]).Label == "Good" && g.EX[0].Ping == 412, "route grade from percent_of_best, latency from the probe");
+        Check(g.GradeOf(g.EX[1]).K == "weak", "under 90 % of the best exit is a weak route");
         Check(g.Best()?.Id == "gvpn-ger-1-j9os", "best exit by route quality");
         Check(g.S.Conn == "connected" && g.S.Loc == "gvpn-lt-1-ynm1", "connected to the reported destination");
         Check(Math.Abs(g.S.ConnSec - 90) < 5, "connection time from since");

@@ -333,15 +333,16 @@ public sealed class RealBackend
                 var cc = x["geo"]?["country"]?.ToString() ?? "";
                 var rh = d?["route_health"];
                 var routable = rh?["state"]?["type"]?.ToString() is null or "routable";
-                var walk = rh?["walk"];
+                // the core reports each exit's path as a percent of the best exit's (100 = the best)
+                var pct = rh?["percent_of_best"];
                 var probe = rh?["quick_probe"];
                 var check = probe?["type"]?.ToString() == "checked" ? probe : probe?["last"];
                 var e = new Exit
                 {
                     Id = id, Country = CountryName(cc), Cc = cc.ToUpperInvariant(), Place = x["meta"]?["description"]?.ToString() ?? "",
                     Routable = routable,
-                    Measured = walk?["type"]?.ToString() == "paths",
-                    Pv = walk?["best_value"]?.GetValue<double>() ?? 0,
+                    Measured = pct != null,
+                    Pv = (pct?.GetValue<double>() ?? 0) / 100,
                     Ping = (int)Ms(check?["status_rtt"]),
                 };
                 e.City = x["meta"]?["name"]?.ToString() ?? $"{e.Country} #{AppEngine.Xid(id)}";
@@ -491,7 +492,7 @@ public sealed class RealBackend
     {
         var state = h?["state"]?["type"]?.ToString();
         var reason = h?["state"]?["reason"];
-        var walk = h?["walk"];
+        var walked = h?["walked_at"] != null;
         var probeErr = h?["quick_probe"]?["last"]?["error"]?.ToString() ?? h?["quick_probe"]?["error"]?.ToString();
         string text = state switch
         {
@@ -502,12 +503,7 @@ public sealed class RealBackend
                 "cannot_open_session" => "The exit refused the session: " + reason?["error"],
                 var t => "The exit cannot be used (" + t + ").",
             },
-            "not_routable" => walk?["type"]?.ToString() switch
-            {
-                "not_announced" => "The exit has not announced itself on the network, so there is no way to reach it.",
-                "no_path" => $"No relay path to the exit right now ({walk?["forward_count"]} forward, {walk?["return_count"]} return).",
-                _ => "There is no route to this exit right now.",
-            },
+            "not_routable" => walked ? "No relay path to the exit right now." : "The route to this exit is still being checked.",
             _ => "The exit did not answer the connection attempt.",
         };
         var last = h?["last_error"]?.ToString() ?? probeErr;

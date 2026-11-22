@@ -187,7 +187,7 @@ public sealed class Pages
         if (a > 0) kvs.Add(Kv("Data left here", w.Live("left", Val(""))));
         var gr = G.GradeOf(e);
         kvs.Add(Kv("Route", Val(gr.Label)));
-        if (e.Measured) kvs.Add(Kv("Path value", Val(Math.Round(e.Pv * 100) + "%")));
+        if (e.Measured) kvs.Add(Kv("Path vs. best exit", Val(Math.Round(e.Pv * 100) + "%")));
         var col = V(12, new VariableSizedWrapGridLike(kvs, 120, 4));
         if (a > 0 && G.IsOn) col.Children.Add(Box(Usage("Data left at " + e.City)));
         return col;
