@@ -189,7 +189,7 @@ public static class SelfTest
         Reply("{\"type\":\"unable_to_connect\"," + LT + ",\"route_health\":{\"type\":\"unrecoverable\",\"reason\":{\"type\":\"incompatible_api_version\",\"offered\":[]}}}");
         Check(g.S.Conn == "idle" && g.S.Flash?.Text == "This exit runs a version this app cannot talk to.", "unable_to_connect shows its reason");
         Reply("{\"type\":\"waiting_to_connect\"," + LT + ",\"route_health\":{\"type\":\"not_routable\"}}");
-        Check(g.S.Conn == "connecting" && g.S.Flash?.Text == "There is no route to this exit right now.", "waiting_to_connect shows its reason");
+        Check(g.S.Conn == "connecting" && g.S.Flash?.Text == "The route to this exit is still being checked.", "waiting_to_connect shows its reason (no walked_at yet: still checking)");
         Reply("{\"type\":\"destination_not_found\"}");
         Check(g.S.Conn == "idle" && g.S.Flash?.Tone == "bad", "destination_not_found is a refusal");
         Reply("{\"type\":\"destination_ambiguous\",\"candidates\":[\"a\",\"b\"]}");
