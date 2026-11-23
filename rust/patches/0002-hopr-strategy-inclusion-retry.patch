@@ -7,6 +7,6 @@ index 51d91b49..0c0c77a3 100644
  panic         = "abort"
  strip         = true
 +
-+# hopr-strategy with the Curvy inclusion-note retry (SCBuergel/hopr-strategy fix/curvy-inclusion-note-race, 9.2.1) until it is published
++# hopr-strategy main with the Curvy relayed-deposit lookup retry (hoprnet/hopr-strategy#170, merged; 9.2.1) until it is published
 +[patch.crates-io]
-+hopr-strategy = { git = "https://github.com/SCBuergel/hopr-strategy", rev = "d6ad33ff62dcbf83155864a4e882e0784aca2d73" }
++hopr-strategy = { git = "https://github.com/hoprnet/hopr-strategy", rev = "2c209bd3897d5c47ae358889c0c83f85274cabb3" }

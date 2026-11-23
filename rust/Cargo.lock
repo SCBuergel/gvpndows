@@ -4630,7 +4630,7 @@ dependencies = [
 
 [[package]]
 name = "gvpndows"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305 0.10.1",
@@ -5262,7 +5262,7 @@ dependencies = [
 [[package]]
 name = "hopr-strategy"
 version = "9.2.1"
-source = "git+https://github.com/SCBuergel/hopr-strategy?rev=d6ad33ff62dcbf83155864a4e882e0784aca2d73#d6ad33ff62dcbf83155864a4e882e0784aca2d73"
+source = "git+https://github.com/hoprnet/hopr-strategy?rev=2c209bd3897d5c47ae358889c0c83f85274cabb3#2c209bd3897d5c47ae358889c0c83f85274cabb3"
 dependencies = [
  "anyhow",
  "async-trait",

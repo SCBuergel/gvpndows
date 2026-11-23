@@ -92,8 +92,8 @@ cherry-picked onto client `8a0e3be` (0.2.3's client, hoprnet master `ff0076ef`),
 SCBuergel/edge-client `sidecar-relayer-on-7bafb47` (draft hoprnet/edge-client#276 on edge-client
 `7bafb47`). Earlier builds for comparison: `12f56a6` (0.2.4: side-car on client main `e6b33f36`) and
 `25a644c` (experiment 1: plain `e6b33f36`). `rust/patches/0002-hopr-strategy-inclusion-retry.patch`
-adds hopr-strategy from SCBuergel/hopr-strategy `d6ad33ff` (retries the note lookup after a relayed
-deposit); drop it once that fix is released.
+adds hopr-strategy main `2c209bd3` (hoprnet/hopr-strategy#170, merged: retries the note lookup after a
+relayed deposit, with backoff); drop it once hopr-strategy 9.2.1 is published.
 
 1. Set the new commit as `CLIENT_REF` (and its repository as `CLIENT_REPO`) in `.github/workflows/windows-installer.yml` and
    `scripts/do-build/build-remote.sh` (and its mention in `setup-remote.sh`).
